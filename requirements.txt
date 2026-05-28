@@ -1,0 +1,6 @@
+streamlit>=1.38.0
+lxml
+pymupdf>=1.24.0
+opencv-python-headless
+pytesseract
+Pillow
