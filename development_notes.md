@@ -63,6 +63,8 @@ non-flattened-pdf, opencv + PyMuPDF 有两种结果。
 注意在我的机器上调用python要这样子，e.g.
 py -m streamlit run app.py
 
+我们的交流，我提出需求时可能是中文，你也可以用中文回复，但是涉及专业名词的，用英文，比如Git Push，不要用"推送"，涉及任何专业领域的，programming CIDSC等area，都要有英文原始的转有名词，确保我能正确理解你的意思。
+
 
 | 阶段 | 内容 | 目标 | 建议时长 |
 | --- | --- | --- | --- |
@@ -159,6 +161,5 @@ issue8，提取的信息不准确，为什么有DDORRE，这不正常，应该�
 
 
 28May2026: Now Copilot added into this project.
-	
-	
-	
+
+接下来，我会把执行streamlit后，碰到的问题记录在issue_record.md，我会及时命令你读取它，以理解我在网页端所发现的问题。	

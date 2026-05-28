@@ -462,6 +462,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "total_not_submitted_entries": len(not_sub_list),
                 "total_pages": len(doc),
                 "processing_time_seconds": elapsed,
+                "processing_time": elapsed,
                 "flattened_detected": is_flattened,
                 "flattened_message": flattened_message,
                 "avg_text_per_page": round(avg_text, 1)

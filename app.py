@@ -139,7 +139,11 @@ with tab2:
                             if pymupdf_result["summary"].get("flattened_message"):
                                 st.warning(pymupdf_result["summary"]["flattened_message"])
                             
-                            st.success(f"✅ PyMuPDF completed in {pymupdf_result['summary']['processing_time']}")
+                            proc_time = pymupdf_result["summary"].get("processing_time_seconds", pymupdf_result["summary"].get("processing_time"))
+                            if proc_time is not None:
+                                st.success(f"✅ PyMuPDF completed in {proc_time}s")
+                            else:
+                                st.success("✅ PyMuPDF completed")
                             
                             # === 关键：立即保存到 session_state ===
                             st.session_state.pymupdf_full_data = pymupdf_result["variables"].copy()
