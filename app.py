@@ -224,8 +224,9 @@ with tab2:
                 else:
                     display_raw = raw_display
 
+            classification = "Domain" if item.get("Category") == "dataset_name" else "Variable"
             combined_list.append({
-                "Classification": "Variable",
+                "Classification": classification,
                 "Name": item["Variable"],
                 "Pages": item.get("PageString", ""),
                 "PageCount": item.get("PageCount", len(item.get("Pages", []))),
@@ -270,8 +271,9 @@ with tab2:
                     csv_raw = " | ".join(raw_field)
                 else:
                     csv_raw = str(raw_field)
+                classification = "Domain" if item.get("Category") == "dataset_name" else "Variable"
                 writer.writerow({
-                    "Classification": "Variable",
+                    "Classification": classification,
                     "Name": item["Variable"],
                     "Pages": item.get("PageString", ""),
                     "PageCount": item.get("PageCount", len(item.get("Pages", []))),
