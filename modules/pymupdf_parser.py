@@ -91,8 +91,15 @@ def extract_annotation_regions(page: fitz.Page) -> List[str]:
                     text_in_rect = page.get_text("text", clip=rect).strip()
 
                 if text_in_rect:
-                    # Clean very short parenthetical markers: parentheses containing <=3 letters/spaces
-                    cleaned = re.sub(r'\(\s*[A-Za-z\s]{0,3}\s*\)', '', text_in_rect)
+                    # initial value
+                    cleaned = text_in_rect
+                    # Remove very short parenthetical markers like '( )' or '( y )'
+                    cleaned = re.sub(r'\(\s*[A-Za-z\s]{0,3}\s*\)', '', cleaned)
+                    # Remove leading parenthetical fragments, closed or not, e.g. '(x )', '(x', '(x FAORRES'
+                    cleaned = re.sub(r'^\(\s*[^)]{0,15}\)\s*', '', cleaned)  # closed parentheses at start
+                    cleaned = re.sub(r'^\(\s*[^)]{1,15}\s+', '', cleaned)    # opening parenthesis with no close, up to 15 chars
+                    # Remove any residual leading '('
+                    cleaned = re.sub(r'^\(\s*', '', cleaned)
                     # Collapse multiple spaces and normalize
                     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
                     if cleaned:
