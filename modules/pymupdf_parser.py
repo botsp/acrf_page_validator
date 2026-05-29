@@ -339,6 +339,9 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             "category": "unknown",
             "flag": "potential_nonstandard"
         })
+
+        # Domain annotations: domain -> set(pages)
+        domain_index = defaultdict(set)
         
         # Separate tracking for NOT SUBMITTED
         not_submitted_entries = []
@@ -364,7 +367,23 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             for ann_text in annotation_texts:
                 if not ann_text.strip():
                     continue
-                
+
+                # Heuristic: detect domain annotations in the annotation text
+                try:
+                    # Match explicit dataset tokens listed in standard_terms
+                    for m in re.finditer(r'\b([A-Z]{1,3})\b', ann_text):
+                        token = m.group(1)
+                        if token in standard_terms.get("dataset", set()):
+                            domain_index[token].add(page_idx)
+                    # Check pattern like 'DM (Demographics)' at line start
+                    m2 = re.match(r'^([A-Z]{1,3})\b', ann_text)
+                    if m2:
+                        t0 = m2.group(1)
+                        if t0 in standard_terms.get("dataset", set()):
+                            domain_index[t0].add(page_idx)
+                except Exception:
+                    pass
+
                 # Extract candidate terms
                 candidates = extract_candidates(ann_text)
                 
@@ -435,6 +454,17 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "Flag": info["flag"]
             })
         
+        # ==================== Build domain annotation list ====================
+        domain_list = []
+        for dom, pages in sorted(domain_index.items()):
+            page_list = sorted(pages)
+            domain_list.append({
+                "Domain": dom,
+                "Pages": page_list,
+                "PageString": ",".join(map(str, page_list)),
+                "PageCount": len(page_list)
+            })
+
         # ==================== Aggregate NOT SUBMITTED ====================
         # Build ordered list of page occurrences (allow duplicates) preserving appearance order
         pages_sequence = []
@@ -463,6 +493,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
         return {
             "status": "success",
             "variables": final_variables,
+            "domain_annotations": domain_list,
             "summary": {
                 "total_variables": len(variables_list),
                 "total_not_submitted_entries": len(not_sub_list),
