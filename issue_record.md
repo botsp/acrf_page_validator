@@ -136,3 +136,28 @@ Issue8.
 
 3.C:\dev\acrf_page_validator\config\acf.pdf 我放在这里了，希望 对你完善解析正则表达式有帮助，但担心过度消耗你的token
 
+Issue9. 
+1.仍然存在这个问题`(x FAORRES when FATESTCD=LDIAM | ( FAORRES when FATESTCD=LDIAM`, 另外，我想知道为什么这个Rawtexts只有这些box，我原本想着每个box都放出来，即使内容重复
+| Variable | Pages                             | PageCount | Category          | Flag                | RawTexts |
+|---------|-----------------------------------|----------:|-------------------|---------------------|---------|
+| LDIAM   | 65,66,67,68,69,70,71,72,73,74,75,76,108,109 | 14        | standard_variable | suffix_prefix_match | FAORRES when FATESTCD=LDIAM | (x FAORRES when FATESTCD=LDIAM | ( FAORRES when FATESTCD=LDIAM |
+
+2.DOMAIN相关的分类不对，NOT SUBMITTED不区分Classification，应该是空的
+| Classification | Name | Pages    | PageCount | Category          | Flag                | RawTexts                                   |
+|----------------|------|----------|----------:|-------------------|---------------------|--------------------------------------------|
+| Variable       | DM   | 19,20    | 2         | standard_variable | suffix_prefix_match | DM (Demographics)                          |
+| Variable       | AE   | 2,3,4,17 | 4         | standard_variable | suffix_prefix_match | AE (Adverse Events) \| Used for RELREC of AE and CM |
+
+3.回答我，目前的代码，Category，Flag的处理机制是怎样的
+classify_term 按优先级判定：黑名单 → NOT SUBMITTED → exact match (standard_terms) → suffix/prefix match → SUPP pattern → unknown。
+Flag 值表示匹配来源（exact_match, suffix_prefix_match, supp_match, potential_nonstandard）。在聚合时，
+代码用一个 priority 表（exact=3,suffix=2,supp=1,unknown=0）来保留最高优先级的 category/flag。
+
+Issue10.
+1.为什么这里提取出AND, 我理解这是一段文本，实际上是没有真的SDTM variable，但好奇你为什么提取出来AND，还标记了standard_variable
+
+| Classification | Name | Pages | PageCount | Category | MatchLevel | RawTexts |
+| Variable | AND | 18 | 1 | standard_variable | suffix_prefix | Note: The information would be included in SVUPDES if type of Visit equals "Unscheduled". And if multiple are selected, concatenate with the annotated values with ";" |
+
+
+2.我突然觉得这两列都没意义， Category | MatchLevel ，也许我只要知道无法从given term里匹配到、以完善csv即可，对吧？你从整个项目feature的角度评估下

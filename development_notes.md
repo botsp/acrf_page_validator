@@ -95,6 +95,7 @@ py -m streamlit run app.py
 1. 我确定[fixed rule1]这些annotation都是带有背景色的边框，但可能是实线边框，也可能是虚线边框
 2. 边框内容有这几类:
     1. dataset/domain name( corner case: SQAP—, SUPP—, AP—开头的大写字段，RELREC， RELSPEC，RELREF, RELSUB, POOLDEF，即除了list csv以外，domain name多数情况下长度应该等于2，但绝对≤8)
+		我告诉你domain name length<=8是hard rule，用以排除那些肯定不属于domain的annotation;但你不能用length<=3之类的来判断是不是domain
     2. sdtm standard variable name: [fixed rule2] Annotations for variables and dataset codes should be capitalized， legnth一定≤8
     3. NOT SUBMISTTED(考虑大小写，可能以不同大小写出现（NOT SUBMITTED、Not Submitted、NOTSUBMITTED）提取后，单独作为一个提取类别保留输出)，它通常是标记某个页面其中的几个item NOT SUBMITTED，也可能是整个页面NOT SUBMITTED，所有我觉得你要计数全部的NOT SUBMITTED，不能有去重之类的处理
     统计每个NOT SUBMISTTED的所在页码，以及每页中所出现的全部次数
