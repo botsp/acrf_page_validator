@@ -56,58 +56,47 @@ def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, 
 
 def extract_annotation_regions(page: fitz.Page) -> List[str]:
     """
-    Extract text from annotation regions (boxes with borders/background colors).
-    Only returns text from annotated regions, does NOT fallback to full page text.
-    
+    Extract text from annotation regions using actual PDF annotation objects (annots).
+    Only returns text clipped to each annotation's bbox. This avoids pulling in nearby
+    non-box text. Returns texts in annotation order; if multiple annotations exist,
+    each annotation's full extracted text is kept as one entry.
+
     Args:
         page: PyMuPDF page object
-    
+
     Returns:
         List of extracted annotation texts (may be empty if no annotations found)
     """
     annotation_texts = []
-    
-    # Method 1: Get drawings (rectangles, borders)
+
+    # Preferred method: iterate actual annotation objects (works for non-flattened PDFs)
     try:
-        drawings = page.get_drawings()
-        for drawing in drawings:
-            fill = drawing.get("fill")
-            fill_opacity = drawing.get("fill_opacity", 0)
-            stroke = drawing.get("stroke")
-            
-            # Check if drawing has border (solid or dashed) or fill
-            if fill is not None or (fill_opacity is not None and fill_opacity > 0.05) or stroke is not None:
-                rect = drawing.get("rect")
-                if rect:
-                    text_in_rect = page.get_text("text", clip=rect).strip()
-                    if text_in_rect:
-                        annotation_texts.append(text_in_rect)
+        ann = page.first_annot
+        seen_rects = []
+        while ann is not None:
+            try:
+                rect = ann.rect
+                # Clip page text to the annotation rectangle to get only box content
+                text_in_rect = page.get_text("text", clip=rect).strip()
+                if text_in_rect:
+                    annotation_texts.append(text_in_rect)
+                    seen_rects.append(rect)
+            except Exception:
+                # ignore individual annotation failures
+                pass
+            ann = ann.next
     except Exception:
+        # If annotation iteration fails, fall back to empty list (do NOT use whole-page heuristics)
         pass
-    
-    # Method 2: Text spans with explicit background colors
-    try:
-        text_dict = page.get_text("dict")
-        for block in text_dict.get("blocks", []):
-            if block.get("type") == 1:  # text block
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        # Check for background color or explicit color highlighting
-                        if span.get("bg") or span.get("color"):
-                            text = span.get("text", "").strip()
-                            if text:
-                                annotation_texts.append(text)
-    except Exception:
-        pass
-    
-    # Remove duplicates while preserving order
+
+    # Deduplicate exact duplicate texts while preserving order
     seen = set()
     unique_texts = []
     for text in annotation_texts:
         if text not in seen:
             seen.add(text)
             unique_texts.append(text)
-    
+
     return unique_texts
 
 
@@ -419,13 +408,16 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 if raw not in seen_raw:
                     seen_raw.add(raw)
                     unique_raw.append(raw)
-            
+
+            # Join multiple annotation boxes with '|' to produce a single RawTexts string
+            rawtexts_joined = ' | '.join(unique_raw) if unique_raw else ""
+
             variables_list.append({
                 "Variable": var,
                 "Pages": pages,
                 "PageString": ",".join(map(str, pages)),
                 "PageCount": len(pages),
-                "RawTexts": unique_raw,
+                "RawTexts": rawtexts_joined,
                 "Category": info["category"],
                 "Flag": info["flag"]
             })
