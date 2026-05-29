@@ -411,6 +411,13 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                     new_priority = priority.get(match_level, -1)
                     current_priority = priority.get(current_level, -1)
 
+                    # Promote short dataset tokens (1-3 chars) to override variable suffix matches
+                    try:
+                        if category == "dataset_name" and len(upper_cand) <= 3:
+                            new_priority += 10
+                    except Exception:
+                        pass
+
                     if new_priority > current_priority:
                         variable_index[upper_cand]["category"] = category
                         variable_index[upper_cand]["match_level"] = match_level
