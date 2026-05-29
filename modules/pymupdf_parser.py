@@ -195,73 +195,54 @@ def extract_candidates(text: str) -> Set[str]:
 def classify_term(term: str, raw_context: str, standard_terms: Dict, 
                   suffix_prefix_patterns: Dict, blacklist: Set) -> Tuple[str, str]:
     """
-    Classify a term according to priority levels.
-    
-    Priority:
-    1. Blacklist → skip (return "blacklist", "blacklist")
-    2. NOT SUBMITTED → skip (handled separately)
-    3. Exact match in standard_term.csv → "standard_variable" / "dataset_name"
-    4. Suffix/prefix match in standard_term_suffix_prefix.csv → "standard_variable" / "dataset_name"
-    5. SUPP variable pattern → extract dataset from context (e.g., "SUPPAE"), use that as category
-    6. Unknown → "unknown"
-    
-    Args:
-        term: The term to classify
-        raw_context: The full raw text where term appeared
-        standard_terms: Dict with "dataset" and "variable" sets
-        suffix_prefix_patterns: Dict with "dataset" and "variable" sets
-        blacklist: Set of blacklisted terms
-    
-    Returns:
-        Tuple of (category, flag)
-        - category: "standard_variable", "dataset_name", "SUPPXY", "not_submitted", "unknown"
-        - flag: "exact_match", "suffix_prefix_match", "supp_match", "potential_nonstandard"
+    Classify a term and return (category, match_level).
+
+    Category: semantic class (standard_variable, dataset_name, supp_variable, not_submitted, unknown)
+    Match level: how it was matched (exact | suffix_prefix | supp | none)
+
+    Priority used by caller: prefer higher match_level when multiple occurrences exist.
     """
     upper_term = term.upper()
-    
+
     # Level 1: Blacklist check
     if upper_term in blacklist:
-        return "blacklist", "blacklist"
-    
+        return "blacklist", "none"
+
     # Level 2: NOT SUBMITTED check
     if "NOT" in upper_term and "SUBMITTED" in upper_term:
-        return "not_submitted", ""
-    
+        return "not_submitted", "none"
+
     # Level 3: Exact match in standard_term.csv
     if upper_term in standard_terms.get("variable", set()):
-        return "standard_variable", "exact_match"
+        return "standard_variable", "exact"
     if upper_term in standard_terms.get("dataset", set()):
-        return "dataset_name", "exact_match"
-    
+        return "dataset_name", "exact"
+
     # Level 4: Suffix/prefix match in standard_term_suffix_prefix.csv
-    # Check prefix patterns (e.g., "--ACN" means any term ending with "ACN")
     suffix_prefix = suffix_prefix_patterns.get("variable", set())
     for pattern in suffix_prefix:
         if pattern.startswith("--") and upper_term.endswith(pattern[2:]):
-            return "standard_variable", "suffix_prefix_match"
+            return "standard_variable", "suffix_prefix"
         if pattern.endswith("--") and upper_term.startswith(pattern[:-2]):
-            return "standard_variable", "suffix_prefix_match"
-    
+            return "standard_variable", "suffix_prefix"
+
     suffix_prefix = suffix_prefix_patterns.get("dataset", set())
     for pattern in suffix_prefix:
         if pattern.startswith("--") and upper_term.endswith(pattern[2:]):
-            return "dataset_name", "suffix_prefix_match"
+            return "dataset_name", "suffix_prefix"
         if pattern.endswith("--") and upper_term.startswith(pattern[:-2]):
-            return "dataset_name", "suffix_prefix_match"
-    
+            return "dataset_name", "suffix_prefix"
+
     # Level 5: SUPP variable pattern detection
-    # Extract dataset name from context (e.g., "AEPTRTPT in SUPPAE" → SUPPAE)
     if "SUPP" in upper_term:
-        # Try to extract SUPP dataset from raw context
         supp_pattern = r'(SUPP[A-Z]{2,8})'
         supp_matches = re.findall(supp_pattern, raw_context)
         if supp_matches:
-            # Use the first matched SUPP dataset as category
-            return supp_matches[0], "supp_match"
-        return "supp_variable", "supp_match"
-    
+            return supp_matches[0], "supp"
+        return "supp_variable", "supp"
+
     # Level 6: Unknown
-    return "unknown", "potential_nonstandard"
+    return "unknown", "none"
 
 
 def extract_not_submitted_entries(text: str, page_idx: int) -> List[Dict[str, Any]]:
@@ -344,7 +325,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             "pages": set(),
             "raw_contexts": [],
             "category": "unknown",
-            "flag": "potential_nonstandard"
+            "match_level": "none"
         })
 
         # Domain annotations: domain -> set(pages)
@@ -406,34 +387,33 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         continue
                     
                     upper_cand = candidate.upper()
-                    category, flag = classify_term(
+                    category, match_level = classify_term(
                         upper_cand, ann_text, standard_terms, 
                         suffix_prefix_patterns, blacklist
                     )
-                    
+
                     # Skip blacklist items
                     if category == "blacklist":
                         continue
-                    
+
                     # Record this occurrence
                     variable_index[upper_cand]["pages"].add(page_idx)
-                    
+
                     # Store FULL raw context (untruncated)
                     # Issue 5 fix: preserve complete annotation text
                     variable_index[upper_cand]["raw_contexts"].append(ann_text.strip())
-                    
-                    # Update category and flag with priority logic
-                    # Priority: exact_match > suffix_prefix_match > supp_match > potential_nonstandard
-                    current_flag = variable_index[upper_cand]["flag"]
-                    
-                    # Determine if new flag has higher priority
-                    priority = {"exact_match": 3, "suffix_prefix_match": 2, "supp_match": 1, "potential_nonstandard": 0}
-                    new_priority = priority.get(flag, -1)
-                    current_priority = priority.get(current_flag, -1)
-                    
+
+                    # Update category and match_level with priority logic
+                    # Priority order for match_level: exact (3) > suffix_prefix (2) > supp (1) > none (0)
+                    current_level = variable_index[upper_cand].get("match_level", "none")
+
+                    priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
+                    new_priority = priority.get(match_level, -1)
+                    current_priority = priority.get(current_level, -1)
+
                     if new_priority > current_priority:
                         variable_index[upper_cand]["category"] = category
-                        variable_index[upper_cand]["flag"] = flag
+                        variable_index[upper_cand]["match_level"] = match_level
                     elif new_priority == current_priority and category != "unknown":
                         # Same priority: update category if more specific
                         variable_index[upper_cand]["category"] = category
@@ -458,7 +438,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "PageCount": len(pages),
                 "RawTexts": unique_raw,
                 "Category": info["category"],
-                "Flag": info["flag"]
+                "MatchLevel": info.get("match_level", "none")
             })
         
         # ==================== Build domain annotation list ====================
@@ -489,7 +469,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "Count": len(pages_sequence),
                 "RawTexts": [],
                 "Category": "not_submitted",
-                "Flag": ""
+                "MatchLevel": ""
             })
         
         # Combine variable list with NOT SUBMITTED entries

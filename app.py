@@ -203,7 +203,7 @@ with tab2:
                     "Pages": d.get("PageString", ""),
                     "PageCount": d.get("PageCount", 0),
                     "Category": "dataset",
-                    "Flag": "",
+                    "MatchLevel": "",
                     "RawTexts": ""
                 })
 
@@ -230,7 +230,7 @@ with tab2:
                 "Pages": item.get("PageString", ""),
                 "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                 "Category": item.get("Category", "unknown"),
-                "Flag": item.get("Flag", ""),
+                "MatchLevel": item.get("MatchLevel", ""),
                 "RawTexts": display_raw if display_raw else ""
             })
 
@@ -246,7 +246,7 @@ with tab2:
             import time
             
             output = io.StringIO()
-            fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "Flag", "RawTexts"]
+            fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "MatchLevel", "RawTexts"]
             writer = csv.DictWriter(output, fieldnames=fieldnames)
             writer.writeheader()
 
@@ -259,7 +259,7 @@ with tab2:
                         "Pages": d.get("PageString", ""),
                         "PageCount": d.get("PageCount", 0),
                         "Category": "dataset",
-                        "Flag": "",
+                        "MatchLevel": "",
                         "RawTexts": ""
                     })
 
@@ -276,7 +276,7 @@ with tab2:
                     "Pages": item.get("PageString", ""),
                     "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                     "Category": item.get("Category", "unknown"),
-                    "Flag": item.get("Flag", ""),
+                    "MatchLevel": item.get("MatchLevel", ""),
                     "RawTexts": csv_raw
                 })
             
