@@ -189,13 +189,18 @@ with tab2:
         # 显示表格
         preview_table = []
         for item in filtered_data[:800]:   # 限制显示数量，避免卡顿
+            raw_field = item.get("RawTexts", "")
+            if isinstance(raw_field, list):
+                raw_display = " | ".join(raw_field)
+            else:
+                raw_display = str(raw_field)
             preview_table.append({
                 "Variable": item["Variable"],
                 "Pages": item.get("PageString", ""),
                 "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                 "Category": item.get("Category", "unknown"),
                 "Flag": item.get("Flag", ""),
-                "RawTexts": (" | ".join(item.get("RawTexts", []))[:100] + "...") if item.get("RawTexts") else ""
+                "RawTexts": (raw_display[:100] + "...") if raw_display else ""
             })
         
         if preview_table:
@@ -213,13 +218,18 @@ with tab2:
             writer = csv.DictWriter(output, fieldnames=["Variable", "Pages", "PageCount", "Category", "Flag", "RawTexts"])
             writer.writeheader()
             for item in full_data:
+                raw_field = item.get("RawTexts", "")
+                if isinstance(raw_field, list):
+                    csv_raw = " | ".join(raw_field)
+                else:
+                    csv_raw = str(raw_field)
                 writer.writerow({
                     "Variable": item["Variable"],
                     "Pages": item.get("PageString", ""),
                     "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                     "Category": item.get("Category", "unknown"),
                     "Flag": item.get("Flag", ""),
-                    "RawTexts": " | ".join(item.get("RawTexts", []))
+                    "RawTexts": csv_raw
                 })
             
             csv_bytes = output.getvalue().encode('utf-8')

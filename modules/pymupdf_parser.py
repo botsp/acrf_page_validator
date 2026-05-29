@@ -409,15 +409,12 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                     seen_raw.add(raw)
                     unique_raw.append(raw)
 
-            # Join multiple annotation boxes with '|' to produce a single RawTexts string
-            rawtexts_joined = ' | '.join(unique_raw) if unique_raw else ""
-
             variables_list.append({
                 "Variable": var,
                 "Pages": pages,
                 "PageString": ",".join(map(str, pages)),
                 "PageCount": len(pages),
-                "RawTexts": rawtexts_joined,
+                "RawTexts": unique_raw,
                 "Category": info["category"],
                 "Flag": info["flag"]
             })
