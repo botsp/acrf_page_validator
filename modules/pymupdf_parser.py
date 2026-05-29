@@ -57,9 +57,9 @@ def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, 
 def extract_annotation_regions(page: fitz.Page) -> List[str]:
     """
     Extract text from annotation regions using actual PDF annotation objects (annots).
-    Only returns text clipped to each annotation's bbox. This avoids pulling in nearby
-    non-box text. Returns texts in annotation order; if multiple annotations exist,
-    each annotation's full extracted text is kept as one entry.
+    Clip using a slightly inset bbox to avoid capturing adjacent glyphs (e.g., radio
+    buttons), and perform light cleaning to remove very short parenthetical markers
+    like `( )`, `( y )` that commonly appear near widgets.
 
     Args:
         page: PyMuPDF page object
@@ -72,15 +72,31 @@ def extract_annotation_regions(page: fitz.Page) -> List[str]:
     # Preferred method: iterate actual annotation objects (works for non-flattened PDFs)
     try:
         ann = page.first_annot
-        seen_rects = []
         while ann is not None:
             try:
                 rect = ann.rect
-                # Clip page text to the annotation rectangle to get only box content
-                text_in_rect = page.get_text("text", clip=rect).strip()
+                # Inset the rect slightly to avoid capturing adjacent UI elements (radio circles, borders)
+                pad = 1.5  # points
+                try:
+                    inset_rect = fitz.Rect(rect.x0 + pad, rect.y0 + pad, rect.x1 - pad, rect.y1 - pad)
+                    # If inset becomes invalid, fall back to original rect
+                    if inset_rect.x1 <= inset_rect.x0 or inset_rect.y1 <= inset_rect.y0:
+                        inset_rect = rect
+                except Exception:
+                    inset_rect = rect
+
+                text_in_rect = page.get_text("text", clip=inset_rect).strip()
+                if not text_in_rect:
+                    # Try fallback to original rect if inset removed text unexpectedly
+                    text_in_rect = page.get_text("text", clip=rect).strip()
+
                 if text_in_rect:
-                    annotation_texts.append(text_in_rect)
-                    seen_rects.append(rect)
+                    # Clean very short parenthetical markers: parentheses containing <=3 letters/spaces
+                    cleaned = re.sub(r'\(\s*[A-Za-z\s]{0,3}\s*\)', '', text_in_rect)
+                    # Collapse multiple spaces and normalize
+                    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+                    if cleaned:
+                        annotation_texts.append(cleaned)
             except Exception:
                 # ignore individual annotation failures
                 pass
@@ -420,19 +436,20 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             })
         
         # ==================== Aggregate NOT SUBMITTED ====================
-        # Count occurrences per page
-        not_submitted_agg = defaultdict(int)
+        # Build ordered list of page occurrences (allow duplicates) preserving appearance order
+        pages_sequence = []
         for entry in not_submitted_entries:
-            not_submitted_agg[entry["Page"]] += entry["Count"]
-        
+            # entry has keys: Page and Count
+            pages_sequence.extend([entry["Page"]] * entry.get("Count", 1))
+
         not_sub_list = []
-        for page, total_count in sorted(not_submitted_agg.items()):
+        if pages_sequence:
             not_sub_list.append({
                 "Variable": "NOT SUBMITTED",
-                "Pages": [page],
-                "PageString": str(page),
-                "PageCount": 1,
-                "Count": total_count,
+                "Pages": pages_sequence,
+                "PageString": ",".join(map(str, pages_sequence)),
+                "PageCount": len(pages_sequence),
+                "Count": len(pages_sequence),
                 "RawTexts": [],
                 "Category": "not_submitted",
                 "Flag": ""
