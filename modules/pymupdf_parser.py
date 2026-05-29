@@ -212,11 +212,11 @@ def classify_term(term: str, raw_context: str, standard_terms: Dict,
     if "NOT" in upper_term and "SUBMITTED" in upper_term:
         return "not_submitted", "none"
 
-    # Level 3: Exact match in standard_term.csv
-    if upper_term in standard_terms.get("variable", set()):
-        return "standard_variable", "exact"
+    # Level 3: Exact match in standard_term.csv (prefer dataset exact for short tokens)
     if upper_term in standard_terms.get("dataset", set()):
         return "dataset_name", "exact"
+    if upper_term in standard_terms.get("variable", set()):
+        return "standard_variable", "exact"
 
     # Level 4: Suffix/prefix match in standard_term_suffix_prefix.csv
     suffix_prefix = suffix_prefix_patterns.get("variable", set())
