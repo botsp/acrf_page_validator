@@ -212,8 +212,8 @@ def classify_term(term: str, raw_context: str, standard_terms: Dict,
     if "NOT" in upper_term and "SUBMITTED" in upper_term:
         return "not_submitted", "none"
 
-    # Heuristic: short token followed by explanatory parentheses in the raw context -> likely a domain label (e.g., 'AE (Adverse Events)')
-    if len(upper_term) <= 3 and raw_context and re.search(r'\b' + re.escape(upper_term) + r'\s*\(', raw_context, re.IGNORECASE):
+    # Heuristic: token followed by explanatory parentheses in the raw context -> likely a domain label (e.g., 'AE (Adverse Events)')
+    if raw_context and re.search(r'\b' + re.escape(upper_term) + r'\s*\(', raw_context, re.IGNORECASE):
         return "dataset_name", "exact"
 
     # Level 3: Exact match in standard_term.csv (prefer dataset exact for short tokens)
@@ -414,13 +414,6 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                     priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
                     new_priority = priority.get(match_level, -1)
                     current_priority = priority.get(current_level, -1)
-
-                    # Promote short dataset tokens (1-3 chars) to override variable suffix matches
-                    try:
-                        if category == "dataset_name" and len(upper_cand) <= 3:
-                            new_priority += 10
-                    except Exception:
-                        pass
 
                     if new_priority > current_priority:
                         variable_index[upper_cand]["category"] = category
