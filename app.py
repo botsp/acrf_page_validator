@@ -186,37 +186,84 @@ with tab2:
         
         st.write(f"**Showing {len(filtered_data)} / {total_vars} variables**")
         
-        # 显示表格
-        preview_table = []
+        # 是否在预览中展开 RawTexts
+        expand_raw = st.checkbox("Expand RawTexts in preview (may be long)", value=False, key="expand_raw_preview")
+
+        # Build combined display list including domain annotations (classification column)
+        combined_list = []
+        # Add domain annotations if available
+        domain_ann = None
+        if "pdf_results" in st.session_state and st.session_state.pdf_results:
+            domain_ann = st.session_state.pdf_results.get("pymupdf", {}).get("domain_annotations", [])
+        if domain_ann:
+            for d in domain_ann:
+                combined_list.append({
+                    "Classification": "Domain",
+                    "Name": d.get("Domain"),
+                    "Pages": d.get("PageString", ""),
+                    "PageCount": d.get("PageCount", 0),
+                    "Category": "dataset",
+                    "Flag": "",
+                    "RawTexts": ""
+                })
+
+        # Add variable entries
         for item in filtered_data[:800]:   # 限制显示数量，避免卡顿
             raw_field = item.get("RawTexts", "")
             if isinstance(raw_field, list):
                 raw_display = " | ".join(raw_field)
             else:
                 raw_display = str(raw_field)
-            preview_table.append({
-                "Variable": item["Variable"],
+
+            # 仅在超长时截断，并且仅在截断时添加省略号
+            if expand_raw:
+                display_raw = raw_display
+            else:
+                if raw_display and len(raw_display) > 200:
+                    display_raw = raw_display[:200] + "..."
+                else:
+                    display_raw = raw_display
+
+            combined_list.append({
+                "Classification": "Variable",
+                "Name": item["Variable"],
                 "Pages": item.get("PageString", ""),
                 "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                 "Category": item.get("Category", "unknown"),
                 "Flag": item.get("Flag", ""),
-                "RawTexts": (raw_display[:100] + "...") if raw_display else ""
+                "RawTexts": display_raw if display_raw else ""
             })
-        
-        if preview_table:
-            st.table(preview_table)
+
+        if combined_list:
+            st.table(combined_list)
         else:
-            st.info("No matching variables found.")
+            st.info("No matching annotations found.")
         
         # 下载按钮（始终下载全部）
-        if full_data:
+        if full_data or domain_ann:
             import csv
             import io
             import time
             
             output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=["Variable", "Pages", "PageCount", "Category", "Flag", "RawTexts"])
+            fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "Flag", "RawTexts"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
             writer.writeheader()
+
+            # write domains first
+            if domain_ann:
+                for d in domain_ann:
+                    writer.writerow({
+                        "Classification": "Domain",
+                        "Name": d.get("Domain"),
+                        "Pages": d.get("PageString", ""),
+                        "PageCount": d.get("PageCount", 0),
+                        "Category": "dataset",
+                        "Flag": "",
+                        "RawTexts": ""
+                    })
+
+            # write variables
             for item in full_data:
                 raw_field = item.get("RawTexts", "")
                 if isinstance(raw_field, list):
@@ -224,7 +271,8 @@ with tab2:
                 else:
                     csv_raw = str(raw_field)
                 writer.writerow({
-                    "Variable": item["Variable"],
+                    "Classification": "Variable",
+                    "Name": item["Variable"],
                     "Pages": item.get("PageString", ""),
                     "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                     "Category": item.get("Category", "unknown"),
