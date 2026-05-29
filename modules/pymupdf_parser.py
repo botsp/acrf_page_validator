@@ -212,6 +212,10 @@ def classify_term(term: str, raw_context: str, standard_terms: Dict,
     if "NOT" in upper_term and "SUBMITTED" in upper_term:
         return "not_submitted", "none"
 
+    # Heuristic: short token followed by explanatory parentheses in the raw context -> likely a domain label (e.g., 'AE (Adverse Events)')
+    if len(upper_term) <= 3 and raw_context and re.search(r'\b' + re.escape(upper_term) + r'\s*\(', raw_context, re.IGNORECASE):
+        return "dataset_name", "exact"
+
     # Level 3: Exact match in standard_term.csv (prefer dataset exact for short tokens)
     if upper_term in standard_terms.get("dataset", set()):
         return "dataset_name", "exact"
