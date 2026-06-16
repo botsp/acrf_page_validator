@@ -161,3 +161,21 @@ Issue10.
 
 
 2.我突然觉得这两列都没意义， Category | MatchLevel ，也许我只要知道无法从given term里匹配到、以完善csv即可，对吧？你从整个项目feature的角度评估下
+
+
+Issue11.
+1.NOT SUBMITTED对应的Classification，不应该是variable，直接标记NOT SUBMITTED;
+2.做下排序，按照Classification，Domain->Variable->Not submitted排序
+3.RELREC被标记为variable了，但实际上它是Domain，我理解可能的原因是，把row text all upper case的字段识别为变量了；如果是这个原因的话，我希望加一个判断，优先匹配dataset name，然后再标记variable
+
+Issue12.
+1.annotation里并不是全部的大写都是潜在变量或者domain/dataset，比如下面这三个，--TESTCD=, DSDECOD=,DSTERM=,但我无法列举全部的情况，但我比较有把握应该这样去判断：即等号后紧跟的大写字段，通常是variable value，不是variable name
+if Y then DSDECOD/DSTERM=ENTERED INTO TRIAL
+if No then VSSTAT=NOT DONE when VSTESTCD=VSALL
+VSORRES when VSTESTCD=HEIGHT
+new feature: 把variable value一起提取出来：DSDECOD=ENTERED INTO TRIAL，DSTERM=ENTERED INTO TRIAL, VSTESTCD=VSALL,VSTESTCD=HEIGHT
+2.前面issue11.3(3.RELREC被标记为variable了，但实际上它是Domain，我理解可能的原因是，把row text all upper case的字段识别为变量了；如果是这个原因的话，我希望加一个判断，优先匹配dataset name，然后再标记variable)
+这个问题并没有解决。
+| Classification | Name   | Pages | PageCount | Category            | RawTexts                                       |
+|----------------|--------|-------|-----------|---------------------|------------------------------------------------|
+| Variable       | RELREC | 17    | 1         | standard_variable   | Used for RELREC of AE \| Used for RELREC of MH and CM |

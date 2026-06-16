@@ -185,3 +185,24 @@ Test 7: 优先级升级 ✓
 **验证**: ✅ 已通过  
 **文档**: ✅ 已完成  
 **准备**: ✅ 准备生产
+
+---
+
+## 2026-06-16 会话更新（Track & Reason）
+
+### Track
+- UI: 默认聚焦未匹配项（`Category=unknown`），`MatchLevel` 改为可选 debug 显示。
+- UI/Export: 新增仅未匹配项 CSV 导出；全量与未匹配导出均按 `Classification` 排序。
+- 分类设计: 统一 Domain 语义为 `dataset_name`，并去除 Domain 重复展示（避免同一 domain 两行）。
+- Issue11: `NOT SUBMITTED` 的 `Classification` 改为 `NOT SUBMITTED`，不再归类为 `Variable`。
+- 解析器: 增加 dataset 优先判定，修复 `RELREC` 等 dataset 被误标为 variable。
+- 配置加载: 修复 CSV BOM 表头导致标准词典未加载的问题（`standard_term.csv` / `standard_term_suffix_prefix.csv`）。
+- 提取策略: 等号右侧 token 不再当作变量名候选，降低误识别。
+- 新能力: 提取 `VARIABLE=VALUE` 结果项（支持 `A/B=VALUE` 拆分），并按需求排除 `VSSTAT=NOT DONE`。
+- 表格展示: 表格单元格强制换行，减少横向滚动。
+
+### Reason
+- 以“补全标准词典”为主目标，优先暴露无法匹配项。
+- 统一分类语义，避免重复和统计歧义，提升结果可读性与可维护性。
+- 修复配置加载根因（BOM）后，才能保证 dataset 判定链路可靠。
+- 将规则从“只识别变量名”扩展到“变量名 + 关键取值”，便于 aCRF 标注审阅。

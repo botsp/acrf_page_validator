@@ -160,6 +160,30 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
     return results
 
 
+def extract_variable_value_pairs(text: str) -> List[Tuple[str, str, str]]:
+    """
+    Extract VARIABLE=VALUE pairs from annotation text.
+    Supports shared-value syntax like DSDECOD/DSTERM=ENTERED INTO TRIAL.
+
+    Returns:
+        List of tuples: (variable_name, value_text, combined_pair_text)
+    """
+    pairs = []
+    pattern = r'([A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*)\s*=\s*([A-Z0-9][A-Z0-9\s/\-]{0,80}?)(?=\s+(?:when|if|then)\b|\s*\||\s*;|$)'
+    for match in re.finditer(pattern, text):
+        lhs = match.group(1).strip()
+        value = re.sub(r'\s{2,}', ' ', match.group(2).strip())
+        if not lhs or not value:
+            continue
+        left_vars = [x.strip().upper() for x in lhs.split("/") if x.strip()]
+        for var in left_vars:
+            if 2 <= len(var) <= 8:
+                if var == "VSSTAT" and value == "NOT DONE":
+                    continue
+                pairs.append((var, value, f"{var}={value}"))
+    return pairs
+
+
 def extract_candidates(text: str) -> Set[str]:
     """
     Extract candidate terms (potential variable/dataset names) from text.
@@ -173,6 +197,22 @@ def extract_candidates(text: str) -> Set[str]:
         Set of candidate terms
     """
     candidates = set()
+    equal_value_spans = []
+
+    # Heuristic: tokens on the right side of "=" are usually values, not variable/domain names.
+    for match in re.finditer(r'=\s*([A-Z0-9][A-Z0-9\s/\-]{0,80})', text):
+        value_text = match.group(1).rstrip()
+        if not value_text:
+            continue
+        span_start = match.start(1)
+        span_end = span_start + len(value_text)
+        equal_value_spans.append((span_start, span_end))
+
+    def is_in_equal_value(pos: int) -> bool:
+        for start, end in equal_value_spans:
+            if start <= pos < end:
+                return True
+        return False
     
     # Rule: Capitalized terms (all caps)
     # Length: 2-8 characters (standard SDTM constraint)
@@ -182,6 +222,8 @@ def extract_candidates(text: str) -> Set[str]:
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\b', text):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            if is_in_equal_value(match.start(1)):
+                continue
             # Require fully uppercase token to avoid capturing capitalized words like 'And'
             if not token.isupper():
                 continue
@@ -195,6 +237,8 @@ def extract_candidates(text: str) -> Set[str]:
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\s+(?:when|if|then|=|:|;|,)', text):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            if is_in_equal_value(match.start(1)):
+                continue
             if not token.isupper():
                 continue
             if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
@@ -396,7 +440,43 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 for var, dataset in supp_pairs:
                     candidates.add(var)
                     candidates.add(dataset)
-                
+
+                # Extract VARIABLE=VALUE pairs so variable values can be audited directly.
+                value_pairs = extract_variable_value_pairs(ann_text)
+                for left_var, _, pair_text in value_pairs:
+                    category, match_level = classify_term(
+                        left_var, ann_text, standard_terms,
+                        suffix_prefix_patterns, blacklist
+                    )
+                    if left_var in standard_terms.get("dataset", set()) and category != "not_submitted":
+                        category = "dataset_name"
+                        if match_level == "none":
+                            match_level = "exact"
+                    if category == "blacklist":
+                        continue
+
+                    variable_index[pair_text]["pages"].add(page_idx)
+                    variable_index[pair_text]["raw_contexts"].append(pair_text)
+
+                    current_level = variable_index[pair_text].get("match_level", "none")
+                    priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
+                    new_priority = priority.get(match_level, -1)
+                    current_priority = priority.get(current_level, -1)
+                    if new_priority > current_priority:
+                        variable_index[pair_text]["category"] = category
+                        variable_index[pair_text]["match_level"] = match_level
+                    elif new_priority == current_priority and category != "unknown":
+                        current_category = variable_index[pair_text].get("category", "unknown")
+                        category_rank = {
+                            "dataset_name": 3,
+                            "not_submitted": 3,
+                            "standard_variable": 2,
+                            "supp_variable": 1,
+                            "unknown": 0
+                        }
+                        if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
+                            variable_index[pair_text]["category"] = category
+                 
                 # Classify each candidate
                 for candidate in candidates:
                     if not candidate or len(candidate) < 2 or len(candidate) > 8:
@@ -407,6 +487,12 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         upper_cand, ann_text, standard_terms, 
                         suffix_prefix_patterns, blacklist
                     )
+
+                    # Prefer dataset classification when the term is a known dataset token.
+                    if upper_cand in standard_terms.get("dataset", set()) and category != "not_submitted":
+                        category = "dataset_name"
+                        if match_level == "none":
+                            match_level = "exact"
 
                     # Skip blacklist items
                     if category == "blacklist":
@@ -431,8 +517,17 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         variable_index[upper_cand]["category"] = category
                         variable_index[upper_cand]["match_level"] = match_level
                     elif new_priority == current_priority and category != "unknown":
-                        # Same priority: update category if more specific
-                        variable_index[upper_cand]["category"] = category
+                        # Same match level: keep the more specific category (dataset_name > standard_variable > unknown)
+                        current_category = variable_index[upper_cand].get("category", "unknown")
+                        category_rank = {
+                            "dataset_name": 3,
+                            "not_submitted": 3,
+                            "standard_variable": 2,
+                            "supp_variable": 1,
+                            "unknown": 0
+                        }
+                        if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
+                            variable_index[upper_cand]["category"] = category
         
         # ==================== Build final variable list ====================
         variables_list = []

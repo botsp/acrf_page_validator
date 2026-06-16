@@ -164,3 +164,5 @@ issue8，提取的信息不准确，为什么有DDORRE，这不正常，应该�
 28May2026: Now Copilot added into this project.
 
 接下来，我会把执行streamlit后，碰到的问题记录在issue_record.md，我会及时命令你读取它，以理解我在网页端所发现的问题。	
+
+把我们这个对话里全部的updates，记录track&reason，添加commit message，然后push 到GitHub repo

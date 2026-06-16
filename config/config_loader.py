@@ -1,6 +1,15 @@
 from pathlib import Path
 import csv
 
+def _normalize_row(row):
+    normalized = {}
+    for key, value in row.items():
+        if key is None:
+            continue
+        clean_key = key.lstrip("\ufeff").strip().lower()
+        normalized[clean_key] = value
+    return normalized
+
 def load_config():
     config_dir = Path(__file__).parent.parent / "config"
     
@@ -16,6 +25,7 @@ def load_config():
         with open(term_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                row = _normalize_row(row)
                 cat = row.get("category", "").strip().lower()
                 term = row.get("term", "").strip().upper()
                 if not term:
@@ -31,6 +41,7 @@ def load_config():
         with open(pattern_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                row = _normalize_row(row)
                 cat = row.get("category", "").strip().lower()
                 term = row.get("term", "").strip().upper()
                 if not term:

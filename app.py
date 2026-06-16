@@ -28,6 +28,16 @@ st.markdown("""
     .stButton>button {
         width: 100%;
     }
+    div[data-testid="stTable"] table {
+        width: 100%;
+        table-layout: fixed;
+    }
+    div[data-testid="stTable"] th,
+    div[data-testid="stTable"] td {
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -175,19 +185,41 @@ with tab2:
         with col3:
             st.metric("Unknown", unknown_count)
         
-        # 搜索框
+        # 搜索与视图控制
         search_term = st.text_input("🔍 Search Variable", "", key="search_var_pymupdf_stable")
+        show_unmatched_only = st.checkbox(
+            "Show unmatched only (Category = unknown)",
+            value=True,
+            key="show_unmatched_only"
+        )
+        show_match_level = st.checkbox(
+            "Show MatchLevel (debug)",
+            value=False,
+            key="show_match_level"
+        )
         
         # 过滤
         if search_term.strip():
             filtered_data = [item for item in full_data if search_term.lower() in item["Variable"].lower()]
         else:
             filtered_data = full_data
+
+        if show_unmatched_only:
+            filtered_data = [item for item in filtered_data if item.get("Category") == "unknown"]
         
         st.write(f"**Showing {len(filtered_data)} / {total_vars} variables**")
         
         # 是否在预览中展开 RawTexts
         expand_raw = st.checkbox("Expand RawTexts in preview (may be long)", value=False, key="expand_raw_preview")
+
+        def get_classification(category: str) -> str:
+            if category == "not_submitted":
+                return "NOT SUBMITTED"
+            if category in ("dataset_name", "dataset"):
+                return "Domain"
+            return "Variable"
+
+        classification_order = {"Domain": 0, "Variable": 1, "NOT SUBMITTED": 2}
 
         # Build combined display list including domain annotations (classification column)
         combined_list = []
@@ -195,17 +227,26 @@ with tab2:
         domain_ann = None
         if "pdf_results" in st.session_state and st.session_state.pdf_results:
             domain_ann = st.session_state.pdf_results.get("pymupdf", {}).get("domain_annotations", [])
-        if domain_ann:
+        domain_names_in_vars = {
+            item.get("Variable")
+            for item in filtered_data
+            if item.get("Category") in ("dataset_name", "dataset")
+        }
+        if domain_ann and not show_unmatched_only:
             for d in domain_ann:
+                domain_name = d.get("Domain")
+                if domain_name in domain_names_in_vars:
+                    continue
                 combined_list.append({
                     "Classification": "Domain",
-                    "Name": d.get("Domain"),
-                    "Pages": d.get("PageString", ""),
+                    "Name": domain_name,
+                    "Pages": str(d.get("PageString", "")).replace(",", ", "),
                     "PageCount": d.get("PageCount", 0),
-                    "Category": "dataset",
-                    "MatchLevel": "",
+                    "Category": "dataset_name",
                     "RawTexts": ""
                 })
+                if show_match_level:
+                    combined_list[-1]["MatchLevel"] = ""
 
         # Add variable entries
         for item in filtered_data[:800]:   # 限制显示数量，避免卡顿
@@ -224,65 +265,101 @@ with tab2:
                 else:
                     display_raw = raw_display
 
-            classification = "Domain" if item.get("Category") == "dataset_name" else "Variable"
+            classification = get_classification(item.get("Category", "unknown"))
             combined_list.append({
                 "Classification": classification,
                 "Name": item["Variable"],
-                "Pages": item.get("PageString", ""),
+                "Pages": str(item.get("PageString", "")).replace(",", ", "),
                 "PageCount": item.get("PageCount", len(item.get("Pages", []))),
                 "Category": item.get("Category", "unknown"),
-                "MatchLevel": item.get("MatchLevel", ""),
                 "RawTexts": display_raw if display_raw else ""
             })
+            if show_match_level:
+                combined_list[-1]["MatchLevel"] = item.get("MatchLevel", "")
+
+        combined_list.sort(
+            key=lambda x: (
+                classification_order.get(x.get("Classification", "Variable"), 99),
+                str(x.get("Name", ""))
+            )
+        )
 
         if combined_list:
             st.table(combined_list)
         else:
             st.info("No matching annotations found.")
         
-        # 下载按钮（始终下载全部）
+        # 下载按钮（始终下载全部 + unmatched）
         if full_data or domain_ann:
             import csv
             import io
             import time
             
-            output = io.StringIO()
-            fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "MatchLevel", "RawTexts"]
-            writer = csv.DictWriter(output, fieldnames=fieldnames)
-            writer.writeheader()
+            csv_fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "RawTexts"]
+            if show_match_level:
+                csv_fieldnames.insert(5, "MatchLevel")
 
-            # write domains first
-            if domain_ann:
-                for d in domain_ann:
-                    writer.writerow({
-                        "Classification": "Domain",
-                        "Name": d.get("Domain"),
-                        "Pages": d.get("PageString", ""),
-                        "PageCount": d.get("PageCount", 0),
-                        "Category": "dataset",
-                        "MatchLevel": "",
-                        "RawTexts": ""
-                    })
+            def build_csv_bytes(variable_items, include_domains):
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=csv_fieldnames)
+                writer.writeheader()
 
-            # write variables
-            for item in full_data:
-                raw_field = item.get("RawTexts", "")
-                if isinstance(raw_field, list):
-                    csv_raw = " | ".join(raw_field)
-                else:
-                    csv_raw = str(raw_field)
-                classification = "Domain" if item.get("Category") == "dataset_name" else "Variable"
-                writer.writerow({
-                    "Classification": classification,
-                    "Name": item["Variable"],
-                    "Pages": item.get("PageString", ""),
-                    "PageCount": item.get("PageCount", len(item.get("Pages", []))),
-                    "Category": item.get("Category", "unknown"),
-                    "MatchLevel": item.get("MatchLevel", ""),
-                    "RawTexts": csv_raw
-                })
-            
-            csv_bytes = output.getvalue().encode('utf-8')
+                rows = []
+
+                domain_names_in_vars_csv = {
+                    item.get("Variable")
+                    for item in variable_items
+                    if item.get("Category") in ("dataset_name", "dataset")
+                }
+                if include_domains and domain_ann:
+                    for d in domain_ann:
+                        domain_name = d.get("Domain")
+                        if domain_name in domain_names_in_vars_csv:
+                            continue
+                        row = {
+                            "Classification": "Domain",
+                            "Name": domain_name,
+                            "Pages": d.get("PageString", ""),
+                            "PageCount": d.get("PageCount", 0),
+                            "Category": "dataset_name",
+                            "RawTexts": ""
+                        }
+                        if show_match_level:
+                            row["MatchLevel"] = ""
+                        rows.append(row)
+
+                for item in variable_items:
+                    raw_field = item.get("RawTexts", "")
+                    if isinstance(raw_field, list):
+                        csv_raw = " | ".join(raw_field)
+                    else:
+                        csv_raw = str(raw_field)
+                    row = {
+                        "Classification": get_classification(item.get("Category", "unknown")),
+                        "Name": item["Variable"],
+                        "Pages": item.get("PageString", ""),
+                        "PageCount": item.get("PageCount", len(item.get("Pages", []))),
+                        "Category": item.get("Category", "unknown"),
+                        "RawTexts": csv_raw
+                    }
+                    if show_match_level:
+                        row["MatchLevel"] = item.get("MatchLevel", "")
+                    rows.append(row)
+
+                rows.sort(
+                    key=lambda x: (
+                        classification_order.get(x.get("Classification", "Variable"), 99),
+                        str(x.get("Name", ""))
+                    )
+                )
+                for row in rows:
+                    writer.writerow(row)
+
+                return output.getvalue().encode("utf-8")
+
+            csv_bytes = build_csv_bytes(full_data, include_domains=True)
+            unknown_items = [item for item in full_data if item.get("Category") == "unknown"]
+            unknown_csv_bytes = build_csv_bytes(unknown_items, include_domains=False)
             
             st.download_button(
                 label="📥 Download Full Result as CSV",
@@ -290,6 +367,13 @@ with tab2:
                 file_name=f"pymupdf_result_{time.strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
                 key="download_pymupdf_final"
+            )
+            st.download_button(
+                label="📥 Download Unmatched (unknown) as CSV",
+                data=unknown_csv_bytes,
+                file_name=f"pymupdf_unmatched_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="download_pymupdf_unmatched"
             )
 
 # ====================== Tab 3: Cross Validation ======================
