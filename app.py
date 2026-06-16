@@ -1,10 +1,11 @@
 import streamlit as st
 from pathlib import Path
 from modules.xml_parser import parse_define_xml
+from modules.comparator import compare_xml_vs_pymupdf, rows_to_csv_bytes
 
 # ====================== Page Configuration ======================
 st.set_page_config(
-    page_title="ACRF Page Validator",
+    page_title="aCRF Page Validator",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,13 +31,24 @@ st.markdown("""
     }
     div[data-testid="stTable"] table {
         width: 100%;
-        table-layout: fixed;
+        table-layout: fixed !important;
     }
     div[data-testid="stTable"] th,
     div[data-testid="stTable"] td {
-        white-space: normal !important;
+        white-space: pre-wrap !important;
         word-break: break-word !important;
         overflow-wrap: anywhere !important;
+        vertical-align: top !important;
+    }
+    div[data-testid="stDataFrame"] [role="columnheader"],
+    div[data-testid="stDataFrame"] [role="gridcell"] {
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+        vertical-align: top !important;
+    }
+    div[data-testid="stDataFrame"] div[data-testid="stDataFrameResizable"] {
+        overflow-x: hidden !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -44,18 +56,20 @@ st.markdown("""
 # ====================== Sidebar ======================
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/000000/document.png", width=80)
-    st.title("ACRF Page Validator")
-    st.markdown("**SDTM Define.xml vs ACRF PDF Page Number Validation Tool**")
+    st.title("aCRF Page Validator")
+    st.markdown("**SDTM Define.xml vs aCRF PDF Page Number Validation Tool**")
     st.divider()
     st.caption("Lightweight Version v0.1.0")
 
 # ====================== Main Header ======================
-st.markdown('<h1 class="main-header">ACRF Page Validator</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Automatically validate ACRF page references between Define.xml and PDF</p>', 
+st.markdown('<h1 class="main-header">aCRF Page Validator</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Automatically validate aCRF page references between Define.xml and PDF</p>', 
             unsafe_allow_html=True)
 
 # ====================== Tabs ======================
-tab1, tab2, tab3 = st.tabs(["📄 XML Parser", "📑 ACRF PDF Parser", "🔍 Cross Validation"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📄 XML Parser", "📑 aCRF PDF Parser", "🔍 Cross Validation", "📘 Readme"]
+)
 
 # ====================== Tab 1: XML Parser ======================
 with tab1:
@@ -64,10 +78,10 @@ with tab1:
         "Define-XML File (.xml)", 
         type=["xml"], 
         key="xml_uploader",
-        help="Upload the SDTM Define.xml file containing ACRF page references"
+        help="Upload the SDTM Define.xml file containing aCRF page references"
     )
     
-    if st.button("🚀 Parse ACRF Pages from XML", type="primary"):
+    if st.button("🚀 Parse aCRF Pages from XML", type="primary"):
         if xml_file is None:
             st.error("Please upload a Define.xml file first.")
         else:
@@ -79,7 +93,7 @@ with tab1:
                 result = parse_define_xml(xml_content)
                 
                 if result["status"] == "success":
-                    st.markdown("**Extracted ACRF Page References**")
+                    st.markdown("**Extracted aCRF Page References**")
                     
                     # Prepare display data
                     display_data = []
@@ -95,7 +109,7 @@ with tab1:
                     st.table({
                         "Dataset": [row[0] for row in display_data],
                         "Variable": [row[1] for row in display_data],
-                        "ACRF Pages": [row[2] for row in display_data],
+                        "aCRF Pages": [row[2] for row in display_data],
                         "Page Count": [row[3] for row in display_data]
                     })
                     
@@ -116,10 +130,10 @@ with tab1:
 with tab2:
     st.subheader("2. Upload aCRF PDF")
     pdf_file = st.file_uploader(
-        "ACRF PDF File", 
+        "aCRF PDF File", 
         type=["pdf"], 
         key="pdf_uploader",
-        help="Upload the Annotated Case Report Form (ACRF) PDF"
+        help="Upload the Annotated Case Report Form (aCRF) PDF"
     )
     
     col1, col2 = st.columns(2)
@@ -132,7 +146,7 @@ with tab2:
     
     if st.button("🔍 Extract Variables from PDF", type="primary"):
         if pdf_file is None:
-            st.error("Please upload an ACRF PDF file first.")
+            st.error("Please upload an aCRF PDF file first.")
         else:
             with st.spinner("Processing PDF..."):
                 results = {}
@@ -388,20 +402,202 @@ with tab3:
         cmp_pymupdf = st.checkbox("XML vs PyMuPDF", value=True)
     
     if st.button("⚖️ Start Cross Validation", type="primary"):
-        if xml_file is None or pdf_file is None:
-            st.warning("Please complete XML and PDF parsing first.")
+        xml_result = st.session_state.get("xml_result")
+        pdf_results = st.session_state.get("pdf_results")
+        if not isinstance(pdf_results, dict):
+            pdf_results = st.session_state.get("pdf_result", {})
+        pymupdf_result = pdf_results.get("pymupdf") if isinstance(pdf_results, dict) else None
+
+        if not cmp_opencv and not cmp_pymupdf:
+            st.warning("Please select at least one comparison method.")
+        elif not xml_result:
+            st.warning("Please parse Define.xml first in Tab 1.")
+        elif cmp_pymupdf and not pymupdf_result:
+            st.warning("Please run PyMuPDF parsing first in Tab 2.")
         else:
             with st.spinner("Performing cross validation..."):
-                st.success("✅ Validation completed!")
-                
-                st.markdown("**Validation Report**")
-                validation_data = [
-                    ["VSDTC", "77-87,119-121", "77-87,119", "⚠️ Mismatch"],
-                    ["VSORRES", "45,46", "45", "⚠️ Mismatch"],
-                    ["FALOC", "102", "102", "✅ Match"]
-                ]
-                st.table(validation_data)
+                if cmp_pymupdf:
+                    compare_result = compare_xml_vs_pymupdf(xml_result, pymupdf_result)
+                    st.session_state.compare_xml_vs_pymupdf = compare_result
+
+                    if compare_result.get("status") == "success":
+                        st.success("✅ XML vs PyMuPDF validation completed.")
+                    else:
+                        st.error(f"Cross validation failed: {compare_result.get('error_message', 'Unknown error')}")
+
+                if cmp_opencv:
+                    st.info("OpenCV comparison is not connected yet in this version.")
+
+    compare_result = st.session_state.get("compare_xml_vs_pymupdf")
+    if compare_result and compare_result.get("status") == "success":
+        summary = compare_result.get("summary", {})
+        summary_by_dataset = compare_result.get("summary_by_dataset", [])
+        detail_rows = compare_result.get("detail_rows", [])
+        extra_pdf_rows = compare_result.get("extra_pdf_rows", [])
+        extra_pdf_domain_rows = compare_result.get("extra_pdf_domain_rows", [])
+
+        st.markdown("**Validation Summary**")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("XML Variables", summary.get("total_xml_variables", 0))
+        with m2:
+            st.metric("Match + Compound", summary.get("matched", 0) + summary.get("compound_resolved", 0))
+        with m3:
+            st.metric("Page Mismatch", summary.get("page_mismatch", 0))
+        with m4:
+            st.metric("Missing in PDF", summary.get("missing_in_pdf", 0))
+        with m5:
+            st.metric("Extra in PDF", summary.get("extra_in_pdf_variables", 0))
+
+        if summary_by_dataset:
+            st.markdown("**Summary by Dataset**")
+            st.table(summary_by_dataset)
+
+        def wrap_text(value, max_len=None):
+            text = str(value or "").strip()
+            if not text:
+                return ""
+            text = text.replace(",", ", ")
+            text = text.replace(" | ", "\n")
+            if max_len and len(text) > max_len:
+                return text[:max_len] + "..."
+            return text
+
+        detail_rows_for_display = []
+        for row in detail_rows:
+            detail_rows_for_display.append(
+                {
+                    "XML": f"{row.get('XML_Dataset', '')}  {wrap_text(row.get('XML_Variable', ''))}",
+                    "Pages": f"XML: {wrap_text(row.get('XML_Pages', ''))}     PDF: {wrap_text(row.get('PDF_Pages', ''))}",
+                    "PDF Match": wrap_text(row.get("PDF_Matched_Name", "")),
+                    "Result": (
+                        f"{row.get('diff_type', '')}\n"
+                        f"relation: {row.get('page_subset') or '-'}\n"
+                        f"path: {row.get('match_path') or '-'}"
+                    ),
+                    "Diff Detail": wrap_text(row.get("page_diff_detail", "")),
+                    "Note": wrap_text(row.get("note", "")),
+                }
+            )
+
+        st.markdown("**Validation Detail (XML as reference)**")
+        if detail_rows_for_display:
+            st.table(detail_rows_for_display)
+        else:
+            st.info("No detail records were generated.")
+
+        if extra_pdf_rows:
+            st.markdown("**Extra Variables in PyMuPDF (not in XML contract)**")
+            extra_pdf_rows_for_display = []
+            for row in extra_pdf_rows:
+                extra_pdf_rows_for_display.append(
+                    {
+                        "PDF Name": wrap_text(row.get("PDF_Name", "")),
+                        "PDF Pages": wrap_text(row.get("PDF_Pages", "")),
+                        "Category": row.get("Category", ""),
+                        "Subtype": row.get("subtype", ""),
+                        "RawTexts": wrap_text(row.get("RawTexts", ""), max_len=220),
+                    }
+                )
+            st.table(extra_pdf_rows_for_display)
+
+        if extra_pdf_domain_rows:
+            st.markdown("**Extra Domains in PyMuPDF**")
+            extra_pdf_domain_rows_for_display = []
+            for row in extra_pdf_domain_rows:
+                extra_pdf_domain_rows_for_display.append(
+                    {
+                        "PDF Domain": wrap_text(row.get("PDF_Domain", "")),
+                        "PDF Pages": wrap_text(row.get("PDF_Pages", "")),
+                        "Subtype": row.get("subtype", ""),
+                    }
+                )
+            st.table(extra_pdf_domain_rows_for_display)
+
+        import time
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        summary_fields = [
+            "total_xml_variables",
+            "total_pdf_variables",
+            "total_pdf_domains",
+            "matched",
+            "compound_resolved",
+            "page_mismatch",
+            "missing_in_pdf",
+            "low_confidence",
+            "extra_in_pdf_variables",
+            "extra_in_pdf_domains",
+        ]
+        detail_fields = [
+            "XML_Dataset",
+            "XML_Variable",
+            "XML_Pages",
+            "XML_PageCount",
+            "PDF_Matched_Name",
+            "PDF_Pages",
+            "PDF_PageCount",
+            "diff_type",
+            "page_subset",
+            "match_path",
+            "page_diff_detail",
+            "note",
+        ]
+        extra_var_fields = [
+            "diff_type",
+            "PDF_Name",
+            "PDF_Pages",
+            "PDF_PageCount",
+            "Category",
+            "subtype",
+            "RawTexts",
+        ]
+        extra_domain_fields = [
+            "diff_type",
+            "PDF_Domain",
+            "PDF_Pages",
+            "PDF_PageCount",
+            "subtype",
+        ]
+
+        st.download_button(
+            label="📥 Download Compare Summary CSV",
+            data=rows_to_csv_bytes([summary], summary_fields),
+            file_name=f"compare_summary_{timestamp}.csv",
+            mime="text/csv",
+            key="download_compare_summary",
+        )
+        st.download_button(
+            label="📥 Download Compare Detail CSV",
+            data=rows_to_csv_bytes(detail_rows, detail_fields),
+            file_name=f"compare_detail_{timestamp}.csv",
+            mime="text/csv",
+            key="download_compare_detail",
+        )
+        st.download_button(
+            label="📥 Download Extra PDF Variables CSV",
+            data=rows_to_csv_bytes(extra_pdf_rows, extra_var_fields),
+            file_name=f"compare_extra_pdf_variables_{timestamp}.csv",
+            mime="text/csv",
+            key="download_compare_extra_pdf_variables",
+        )
+        st.download_button(
+            label="📥 Download Extra PDF Domains CSV",
+            data=rows_to_csv_bytes(extra_pdf_domain_rows, extra_domain_fields),
+            file_name=f"compare_extra_pdf_domains_{timestamp}.csv",
+            mime="text/csv",
+            key="download_compare_extra_pdf_domains",
+        )
+
+# ====================== Tab 4: Readme ======================
+with tab4:
+    st.subheader("4. Readme")
+    guide_path = Path(__file__).parent / "COMPARE_RESULT_GUIDE.md"
+    if guide_path.exists():
+        st.markdown(guide_path.read_text(encoding="utf-8"))
+    else:
+        st.warning("COMPARE_RESULT_GUIDE.md was not found.")
 
 # ====================== Footer ======================
 st.divider()
-st.caption("ACRF Page Validator | Lightweight English Version | Built with Streamlit")
+st.caption("aCRF Page Validator | Lightweight English Version | Built with Streamlit")

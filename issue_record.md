@@ -179,3 +179,98 @@ new feature: 把variable value一起提取出来：DSDECOD=ENTERED INTO TRIAL，
 | Classification | Name   | Pages | PageCount | Category            | RawTexts                                       |
 |----------------|--------|-------|-----------|---------------------|------------------------------------------------|
 | Variable       | RELREC | 17    | 1         | standard_variable   | Used for RELREC of AE \| Used for RELREC of MH and CM |
+
+
+
+Issue13.
+接下来，我在想是不是要先把PyMuPDF 的结构去和xml结果进行compare，确保compare功能基本满足需求后再开发OpenCV + OCR 模块；还是现在就开发OpenCV + OCR 模块，你觉得哪个开发流程更好；
+基于我整体的feature goal&blueprint
+
+更好的流程是：先把 PyMuPDF ↔ XML 的 compare 主链路做稳，再开发 OpenCV+OCR。
+
+基于你现在的 goal（结果可解释、可补 CSV、分类稳定、可导出），先把 compare 的输入/输出结构、判定规则、报告格式固定下来，能先把“业务正确性”闭环；否则现在同时上 OCR，会把误差来源混在一起（解析问题 vs compare 规则问题），调试成本会明显变高。
+
+建议顺序就是两步：1) 定义并稳定 compare contract（字段、分类、差异类型、排序/导出） → 2) 让 OpenCV+OCR 作为第二个 parser 接入同一 contract，这样后续只是“替换输入源”，不是重写比较逻辑。
+
+Issue 14. compare
+
+建议的 compare 思路（先定 contract，不改代码逻辑）：
+
+L1 基础变量层：只比 Variable（不含 =、不含复合语法），目标是“业务主字段覆盖率”。
+L2 条件语义层：把两边都标准化为谓词结构再比：target_var + qualifier_var + operator + value。
+例如把 XML 的 DDORRES.DD.DDTESTCD.EQ.AUTOPIND 映射为 (DDORRES, DDTESTCD, EQ, AUTOPIND)
+与 PyMuPDF 的 DDTESTCD=AUTOPIND、DDORRES when DDTESTCD=AUTOPIND 对齐。
+统一 key 规则（contract 核心）：
+entity_type: domain | variable | predicate | not_submitted
+compare_key: 稳定主键（大写、去冗余空白、换行折叠）
+pages: 整数列表（内部排序去重）
+source: xml | pymupdf
+差异类型固定（报告稳定）：
+missing_in_pdf / extra_in_pdf
+page_mismatch（同 key 但页码集合不同）
+format_only_diff（仅写法差异，语义等价）
+low_confidence_parse（无法可靠归一化）
+报告输出建议：
+Summary：L1/L2 各自 precision/recall 风格计数
+Detail：一行一个 compare_key，含 xml_pages / pdf_pages / diff_type / evidence
+CSV 至少三份：summary.csv、diffs_l1.csv、diffs_l2.csv
+
+1.我希望以define解析的结果和格式为准，目前就这样不再改了，试着让 PyMuPDF 的格式向define解析靠拢；
+2.整体上还是比较variable为主，define有解析出每个variable对应的domain/dataset name，但是PyMuPDF无法解析到variable对应的domain这个element；
+3.其次，当然要检查一个variable在两份解析里都出现、且解析出的pages是一样的，比如两边都能确定解析到9，10，11三页；
+
+
+case1:xml的结果对应到PyMuPDF是DDORRES，DDTESTCD两条，但这种就认为是两侧一致匹配了；
+xml parse
+| Dataset | 	Variable        | 	ACRF Pages | PageCount |
+|----------------|------------------------------------|-------|-----------|
+| DD             | DDORRES.DD.DDTESTCD.EQ.AUTOPIND     | 4     | 1         |
+
+PyMuPDF parse
+
+| Classification | Name        | Pages | PageCount | Category            | RawTexts                                                                 |
+|----------------|-------------|-------|-----------|---------------------|--------------------------------------------------------------------------|
+| Variable       | DDORRES     | 4     | 1         | standard_variable   | DDORRES when DDTESTCD=GENCDTH \| DDORRES when DDTESTCD=AUTOPIND \| DDORRES when DDTESTCD=DTHCOIND |
+| Variable       | DDTESTCD=AUTOPIND | 4 | 1 | standard_variable | DDTESTCD=AUTOPIND |
+
+
+case2:这种情况也认为是两侧一致匹配了；
+xml parse
+| Dataset | 	Variable        | 	ACRF Pages | PageCount |
+|----------------|------------------------------------|-------|-----------|
+| VS             | VSORRES.VS.VSTESTCD.EQ.HEIGHT     | 119     | 1         |
+
+PyMuPDF parse
+| Classification | Name              | Pages | PageCount | Category          | RawTexts           |
+|----------------|-------------------|-------|-----------|-------------------|--------------------|
+| Variable       | VSTESTCD=HEIGHT   | 119   | 1         | standard_variable | VSTESTCD=HEIGHT    |
+
+
+补充1：
+a.define解析的结果和格式为准, 但是如果某个变量只在PyMuPDF解析的有，那也应该标记出来的；
+b.对于define解析结果IEORRES.IE.IETESTCD.EQ.I03V020，它有一个固定的规律IEORRES is variable name;IE is domain name;IETESTCD is variable name;EQ means equal;I03V020 is value of variable IETESTCD.
+
+
+
+
+
+Issue 15. 
+1.SUPPVS.QNAM = "VSCOLSRT" /QNAM = "VSSSCAT" 居然没有从xml parse解析出来，你可以先读example_xml_export.md确认下，
+然后分析下原因，不着急改代码，按说xml是正则解析，应该很准确吧？
+-->那这类问题是可接受的，只提取xml有page element的，然后用pdf的用最大限度比较，这样的feature design也合理
+
+2.COMPOUND_RESOLVED relation: exact path: path_A_target_var，MATCH relation: exact path: simple，	
+PAGE_MISMATCH relation: pdf_superset path: path_A_target_var 什么意思；能否整理一个说明书，每个结果element都是什么意思，你可以写出一个md file保留下
+
+3.为什么下面这里有些对应着FAORRES,有些则是FATESTCD=REL，为什么有这种差别
+| Classification | Name | Pages | PageCount | Category | RawTexts |
+|----------------|------|-------|-----------|----------|----------|
+| FA FAORRES.FA.FATESTCD.EQ.LDIAM | FAORRES | XML: 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 108, 109 PDF: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 107, 108, 109 | PAGE_MISMATCH relation: pdf_superset path: path_A_target_var | pdf_only=21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 107 |
+| FA FAORRES.FA.FATESTCD.EQ.OCCUR | FAORRES | XML: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 108 PDF: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 107, 108, 109 | PAGE_MISMATCH relation: pdf_superset path: path_A_target_var | pdf_only=107, 109 |
+| FA FAORRES.FA.FATESTCD.EQ.REL | FATESTCD=REL | XML: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106 PDF: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106 | COMPOUND_RESOLVED relation: exact path: path_B_qualifier_value |  |
+| FA FAORRES.FA.FATESTCD.EQ.RELPR | FATESTCD=RELPR | XML: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 107 PDF: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 102, 103, 104, 105, 106, 107 | COMPOUND_RESOLVED relation: exact path: path_B_qualifier_value |  |
+| FA FAORRES.FA.FATESTCD.EQ.SEV | FATESTCD=SEV | XML: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 103, 104, 106, 108, 109 PDF: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 103, 104, 106, 108, 109 | COMPOUND_RESOLVED relation: exact path: path_B_qualifier_value |  |
+| FA FAORRES.FA.FATESTCD.EQ.TEMP | FATESTCD=TEMP | XML: 102, 105 PDF: 102, 105 | FATESTCD=TEMP | COMPOUND_RESOLVED relation: exact path: path_B_qualifier_value |  |
+| FA FAORRESU.FA.FATESTCD.EQ.TEMP | FAORRESU | XML: 102, 105 PDF: 102, 105 | FAORRESU | COMPOUND_RESOLVED relation: exact path: path_A_target_var |  |
+
+

@@ -165,4 +165,10 @@ issue8，提取的信息不准确，为什么有DDORRE，这不正常，应该�
 
 接下来，我会把执行streamlit后，碰到的问题记录在issue_record.md，我会及时命令你读取它，以理解我在网页端所发现的问题。	
 
+16Jun2026: 
+
 把我们这个对话里全部的updates，记录track&reason，添加commit message，然后push 到GitHub repo
+
+
+注意，代码请给出完整的、稳健的，并严格遵循我们最后所讨论的实现规则； 尽量不要使用pandas以维护轻量，如果有必要使用pandas时，也要先提示我；
+代码中的注释要用英文；每次当我们针对一些issue/需求更新代码时，请最低限度的更新，只针对issue相关的代码去更新，不要modify到前面确定好的、不相干的代码
