@@ -10,6 +10,8 @@ try:
 except ImportError:
     from ..config.config_loader import CONFIG
 
+# Local stopwords to avoid extracting common English words as variables
+DEFAULT_STOPWORDS = {"AND","OR","IF","THEN","THE","A","IN","ON","FOR","WITH","IS","ARE","TO","BY","OF","NOTE"}
 
 def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, float, str]:
     """
@@ -180,6 +182,9 @@ def extract_candidates(text: str) -> Set[str]:
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\b', text):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            # Skip common stopwords and configured blacklist
+            if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
+                continue
             candidates.add(token)
     
     # Pattern 2: Explicit variable references in conditions
@@ -187,6 +192,8 @@ def extract_candidates(text: str) -> Set[str]:
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\s+(?:when|if|then|=|:|;|,)', text, re.IGNORECASE):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
+                continue
             candidates.add(token)
     
     return candidates
