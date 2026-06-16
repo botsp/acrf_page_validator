@@ -20,8 +20,6 @@ env/
 
 # Outputs
 outputs/
-*.pdf
-*.csv
 
 # Temp
 *.tmp
