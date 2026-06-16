@@ -254,7 +254,7 @@ b.对于define解析结果IEORRES.IE.IETESTCD.EQ.I03V020，它有一个固定的
 
 
 
-Issue 15. 
+Issue/question 15. 
 1.SUPPVS.QNAM = "VSCOLSRT" /QNAM = "VSSSCAT" 居然没有从xml parse解析出来，你可以先读example_xml_export.md确认下，
 然后分析下原因，不着急改代码，按说xml是正则解析，应该很准确吧？
 -->那这类问题是可接受的，只提取xml有page element的，然后用pdf的用最大限度比较，这样的feature design也合理
@@ -274,3 +274,7 @@ PAGE_MISMATCH relation: pdf_superset path: path_A_target_var 什么意思；能�
 | FA FAORRESU.FA.FATESTCD.EQ.TEMP | FAORRESU | XML: 102, 105 PDF: 102, 105 | FAORRESU | COMPOUND_RESOLVED relation: exact path: path_A_target_var |  |
 
 
+Issue/question 16. 
+1.感觉现在的compare result读起来有点复杂，它有太多分类了，不容易快速理解；但感觉好像也只能这样，因为从acrf.pdf解析出来的种类就多，交叉xml对比就产生更多分类了。不过从寻找diff的goal来说，
+有哪些关键词是需要我关注的	
+unmapped_variable，PAGE_MISMATCH，extra_domain，还有其他的吗
