@@ -182,6 +182,9 @@ def extract_candidates(text: str) -> Set[str]:
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\b', text):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            # Require fully uppercase token to avoid capturing capitalized words like 'And'
+            if not token.isupper():
+                continue
             # Skip common stopwords and configured blacklist
             if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
                 continue
@@ -189,9 +192,11 @@ def extract_candidates(text: str) -> Set[str]:
     
     # Pattern 2: Explicit variable references in conditions
     # "VAR when", "VAR if", "VAR then", "VAR =", "VAR :", etc
-    for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\s+(?:when|if|then|=|:|;|,)', text, re.IGNORECASE):
+    for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\s+(?:when|if|then|=|:|;|,)', text):
         token = match.group(1)
         if 2 <= len(token) <= 8:
+            if not token.isupper():
+                continue
             if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
                 continue
             candidates.add(token)
