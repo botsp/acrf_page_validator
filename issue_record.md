@@ -82,7 +82,7 @@ Issue5. 一个NOT SUBMITTED只占据一行，然后把出现的page汇总即可�
 | NOT SUBMITTED | 120   | 1         | not_submitted |      |         |
 | NOT SUBMITTED | 121   | 1         | not_submitted |      |         |
 
-Issue6. 
+Issue6.
 1.Rowtextss存在`( ) FAOBJ=ASTHENIA`, 前面的()是不是虚线box导致的？现在是怎样处理实线、虚线box的，有区分吗；
 2.为什么仍有..., `FAOBJ=PAIN ...`
 3.`( y ) FAORRES when FATESTCD=REL | ( y g ) FAORRES when FATESTCD=RELPR`,( y ) ,( y g )从哪来的？
@@ -95,7 +95,7 @@ Issue6.
 | FAORRES  | 21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,102,103,104,105,106,107,108,109 | 74        | standard_variable | suffix_prefix_match | FAORRES when FATESTCD=SEV | FAORRES when FATESTCD=OCCUR | FAORRES when FATESTCD=REL | FAORRES when FATESTCD=RELPR | ( y ) FAORRES when FATESTCD=REL | ( y g ) FAORRES when FATESTCD=RELPR | ( ) FAORRES ... |
 | FAORRESU | 102,105                                                                                                                                                          | 2         | standard_variable | suffix_prefix_match | FAORRESU |
 
-Issue7. 
+Issue7.
 7.1.standard_term_suffix_prefix.csv Column value，这只是一个问题，确认下，你再匹配prefix的时候，理解'--是'--AGENT 的prefix占位符吗
 
 | variable | value     |
@@ -119,7 +119,7 @@ Issue7.
 |---------|-------|----------:|-------------------|---------------------|---------------------|
 | DM      | 19,20 | 2         | standard_variable | suffix_prefix_match | DM (Demographics)   |
 
-Issue8. 
+Issue8.
 1.这次仍存在issue 7.2的问题，示例如下
 
 | Variable | Pages                                                                                                                               | PageCount | Category          | Flag                | RawTexts |
@@ -136,7 +136,7 @@ Issue8.
 
 3.C:\dev\acrf_page_validator\config\acf.pdf 我放在这里了，希望 对你完善解析正则表达式有帮助，但担心过度消耗你的token
 
-Issue9. 
+Issue9.
 1.仍然存在这个问题`(x FAORRES when FATESTCD=LDIAM | ( FAORRES when FATESTCD=LDIAM`, 另外，我想知道为什么这个Rawtexts只有这些box，我原本想着每个box都放出来，即使内容重复
 | Variable | Pages                             | PageCount | Category          | Flag                | RawTexts |
 |---------|-----------------------------------|----------:|-------------------|---------------------|---------|
@@ -254,12 +254,12 @@ b.对于define解析结果IEORRES.IE.IETESTCD.EQ.I03V020，它有一个固定的
 
 
 
-Issue/question 15. 
+Issue/question 15.
 1.SUPPVS.QNAM = "VSCOLSRT" /QNAM = "VSSSCAT" 居然没有从xml parse解析出来，你可以先读example_xml_export.md确认下，
 然后分析下原因，不着急改代码，按说xml是正则解析，应该很准确吧？
 -->那这类问题是可接受的，只提取xml有page element的，然后用pdf的用最大限度比较，这样的feature design也合理
 
-2.COMPOUND_RESOLVED relation: exact path: path_A_target_var，MATCH relation: exact path: simple，	
+2.COMPOUND_RESOLVED relation: exact path: path_A_target_var，MATCH relation: exact path: simple，
 PAGE_MISMATCH relation: pdf_superset path: path_A_target_var 什么意思；能否整理一个说明书，每个结果element都是什么意思，你可以写出一个md file保留下
 
 3.为什么下面这里有些对应着FAORRES,有些则是FATESTCD=REL，为什么有这种差别
@@ -274,7 +274,100 @@ PAGE_MISMATCH relation: pdf_superset path: path_A_target_var 什么意思；能�
 | FA FAORRESU.FA.FATESTCD.EQ.TEMP | FAORRESU | XML: 102, 105 PDF: 102, 105 | FAORRESU | COMPOUND_RESOLVED relation: exact path: path_A_target_var |  |
 
 
-Issue/question 16. 
+Issue/question 16.
 1.感觉现在的compare result读起来有点复杂，它有太多分类了，不容易快速理解；但感觉好像也只能这样，因为从acrf.pdf解析出来的种类就多，交叉xml对比就产生更多分类了。不过从寻找diff的goal来说，
-有哪些关键词是需要我关注的	
+有哪些关键词是需要我关注的
 unmapped_variable，PAGE_MISMATCH，extra_domain，还有其他的吗
+
+
+-------------------------------------------------------------------------------
+round3, 17Jun2026;
+接下来我们开发OpenCV+OCR 模块，你先复习所有的md文件以回忆先前的设想、也回忆下我们在这个folder下所有session的讨论；然后你也可以加载config folder下的两个PDF文件，他们虽然是non-flattened，
+但你就开发 OpenCV+OCR 模块，通过图像识别去抓取下annotation；
+1.抓取规则或者内部的处理，原则上尽量遵循 PyMuPDF 先前确定的处理，当然，如果有什么地方你觉得异常，也请告诉我；
+2.我暂时还没想好UI怎样设计，在同一个界面display PyMuPDF + OpenCV的结果吗，我原先的设想是
+	-flattened pdf，只能通过OpenCV解析出结果；
+	-non-flattened pdf，两个模块都能解析出结果，这时候先对他们俩做一次一次性检查，确保他们一致，再把他们一致的结果去和xml解析的compare
+
+
+IF non-flattened PDF AND 两个都运行:
+  1. PyMuPDF 运行 → 结果A
+  2. OpenCV运行 → 结果B
+  3. 对比A vs B:
+     - 相同的变量/页码 → 绿色 ✅ (confidence high)
+     - 只在A中 → 黄色 ⚠️  (likely valid, OpenCV missed)
+     - 只在B中 → 红色 ❌ (suspicious, possible OCR error)
+  4. 只展示 ✅ 和 ⚠️ 的结果，给用户标记 ❌ 的
+
+自动检测 + 用户控制
+策略：
+1. 先自动检测PDF类型 (用PyMuPDF的 is_flattened_pdf())
+2. 根据PDF类型自动调整
+
+IF flattened PDF:
+   ├─ PyMuPDF: ❌ 禁用 (无文本层，无法提取)
+   └─ OpenCV: ✅ 自动启用 + 运行
+
+IF non-flattened PDF:
+   ├─ PyMuPDF: ✅ 自动启用 + 运行 (快速，~0.25-0.8s)
+   ├─ OpenCV: 📌 用户可勾选 (可选，用来验证)
+   └─ 如果用户勾选: 运行方案A的两层验证
+方面	效果
+自动适应	Flattened/Non-flattened自动选择最佳方案
+速度	Non-flattened默认不用OpenCV（节省30-50秒）
+灵活性	用户可选打开双验证（用于质量检查）
+可控性	保留所有勾选选项，用户有完全的选择权
+用户体验	智能提示"自动启用"，清晰告知为什么
+
+
+Newissue1.
+1. 只勾选 PyMuPDF 时接下结果才如下
+Classification, Name, Pages, PageCount, Category, RawTexts
+
+如果同事勾选OPENCV，解析的结果就是
+Variable, Pages, PageCount, Category
+为什么有这种差异；
+2.0 variables confirmed by both parsers
+
+No consensus between parsers
+为什么，怎么理解，OPENCV only也是空的
+
+OpenCV 和 OCR 是两件事。
+OpenCV负责“找框/找区域”（图像检测），但不负责“读字”。
+真正把框里的像素转成文字的是 OCR 引擎，这里用的是 Tesseract。
+所以现在你会看到：OpenCV检测到很多框，但没有Tesseract就读不出文本，变量自然是空。
+
+是按内容判断 flattened，不是按文件属性。
+当前逻辑在 is_flattened_pdf() 里是读取每页 get_text("text") 的文本量和词数来判定（text layer强弱）。
+不是看 PDF metadata/properties。
+
+为什么这个“flattened”文件还能提取出 NOT SUBMITTED？
+因为这份文件按内容检测其实是 non-flattened（text layer 很强），不是纯图片扫描件。
+所以 PyMuPDF 还能直接读到文本；当前规则里 NOT SUBMITTED 是一个明确关键词，会被单独聚合成变量项。
+你现在看到“只剩 NOT SUBMITTED”说明：
+
+
+Newissue2.
+1.为什么关于NOT SUBMITTED PyMuPDF,,OPENCV提取到不同，还被归类到Consensus
+Classification	Name	Pages	PageCount	Category	RawTexts	PyMuPDF Pages	OpenCV Pages
+Variable	NOT SUBMITTED	10,11,13,16,17,24,26,30,31,32,33,34,40,41,42,43,46,48,49,51,52,57,58,60,61	25	not_submitted		10,10,10,11,13,13,16,17,17,24,26,30,30,31,31,32,32,32,33,33,34,40,41,42,43,46,46,48,49,51,51,52,57,58,60,60,61,61	10,10,10,13,13,16,24,46,46,51,52,61
+------------------------------------
+先这样吧，目前似乎还行，请做充分的记录然后push GitHub；明天聚焦两个任务；
+1.首先是清晰OCR的提取文本；
+2.对于non-flanttened anntatotion pdf，怎样确保结果一致，其次如果有不一致，怎样纳入和XML的comparison
+
+记录与当前结论：
+1. OpenCV 与 OCR 已拆清楚：OpenCV 负责检测 annotation/文本区域，Tesseract 负责把图像区域转成文本。已安装并配置 Tesseract，OpenCV+OCR 链路在 acrf_3039_UC_flattened.pdf 上可运行。
+2. "Flattened" 在本项目中改为 MSG 2.0 aCRF annotation 语境，不再以 PDF text layer 为主判断：
+   - MSG 2.0 readable annotations: annotation objects 存在且 /Contents 可读，PyMuPDF 为主。
+   - Annotation-flattened PDF: annotation objects 缺失或不可读，即使页面 text layer 仍存在，OpenCV+OCR 为主。
+   - Partial/weak annotation layer: annotation layer 不完整，需 PyMuPDF + OpenCV 双跑并人工/规则复核。
+3. 两层验证规则已更新：
+   - Consensus: variable name 一致且 page set 一致；NOT SUBMITTED 还需要重复 occurrence count 一致。
+   - Page Mismatch: 两个 parser 都找到同一名称，但页码或 NOT SUBMITTED occurrence 不一致。
+   - PyMuPDF Only / OpenCV Only: 只在单侧出现。
+4. acrf_3039_UC_flattened.pdf 当前被识别为 Annotation-flattened PDF；对比结果示例为 Consensus=0, Page Mismatch=1 (NOT SUBMITTED), OpenCV Only=466。
+
+明天重点：
+1. 清晰化 OCR 提取文本：检查 RawTexts 噪声、误识别、box 合并/截断、重复文本保留策略，并决定怎样展示 OCR confidence/debug 信息。
+2. non-flattened annotation PDF 的双 parser 一致性策略：定义哪些差异可以自动接受，哪些进入 Page Mismatch/Needs Review，并设计这些差异如何进入 XML comparison（例如只用 Consensus，还是带风险等级纳入）。

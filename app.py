@@ -15,15 +15,15 @@ st.set_page_config(
 st.markdown("""
     <style>
     .main-header {
-        font-size: 2.5rem; 
-        color: #1E88E5; 
-        text-align: center; 
+        font-size: 2.5rem;
+        color: #1E88E5;
+        text-align: center;
         margin-bottom: 0.5rem;
     }
     .sub-header {
-        font-size: 1.3rem; 
-        color: #424242; 
-        text-align: center; 
+        font-size: 1.3rem;
+        color: #424242;
+        text-align: center;
         margin-bottom: 2rem;
     }
     .stButton>button {
@@ -63,7 +63,7 @@ with st.sidebar:
 
 # ====================== Main Header ======================
 st.markdown('<h1 class="main-header">aCRF Page Validator</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Automatically validate aCRF page references between Define.xml and PDF</p>', 
+st.markdown('<p class="sub-header">Automatically validate aCRF page references between Define.xml and PDF</p>',
             unsafe_allow_html=True)
 
 # ====================== Tabs ======================
@@ -75,12 +75,12 @@ tab1, tab2, tab3, tab4 = st.tabs(
 with tab1:
     st.subheader("1. Upload Define.xml")
     xml_file = st.file_uploader(
-        "Define-XML File (.xml)", 
-        type=["xml"], 
+        "Define-XML File (.xml)",
+        type=["xml"],
         key="xml_uploader",
         help="Upload the SDTM Define.xml file containing aCRF page references"
     )
-    
+
     if st.button("🚀 Parse aCRF Pages from XML", type="primary"):
         if xml_file is None:
             st.error("Please upload a Define.xml file first.")
@@ -88,13 +88,13 @@ with tab1:
             with st.spinner("Parsing Define.xml with lxml + XPath..."):
                 # Read file content
                 xml_content = xml_file.getvalue()
-                
+
                 # Call parser
                 result = parse_define_xml(xml_content)
-                
+
                 if result["status"] == "success":
                     st.markdown("**Extracted aCRF Page References**")
-                    
+
                     # Prepare display data
                     display_data = []
                     for var in result["variables"]:
@@ -104,7 +104,7 @@ with tab1:
                             var["PageString"],
                             var["PageCount"]
                         ])
-                    
+
                     # Display as table with headers
                     st.table({
                         "Dataset": [row[0] for row in display_data],
@@ -112,16 +112,16 @@ with tab1:
                         "aCRF Pages": [row[2] for row in display_data],
                         "Page Count": [row[3] for row in display_data]
                     })
-                    
+
                     # Summary
                     st.success(f"""
-                    ✅ Successfully parsed **{result['summary']['total_variables']}** variables 
+                    ✅ Successfully parsed **{result['summary']['total_variables']}** variables
                     from **{result['summary']['unique_datasets']}** datasets.
                     """)
-                    
+
                     # Store in session state for later comparison
                     st.session_state.xml_result = result
-                    
+
                 else:
                     st.error(f"Failed to parse XML: {result.get('error_message', 'Unknown error')}")
 
@@ -130,67 +130,336 @@ with tab1:
 with tab2:
     st.subheader("2. Upload aCRF PDF")
     pdf_file = st.file_uploader(
-        "aCRF PDF File", 
-        type=["pdf"], 
+        "aCRF PDF File",
+        type=["pdf"],
         key="pdf_uploader",
         help="Upload the Annotated Case Report Form (aCRF) PDF"
     )
-    
+
+    # ==================== Auto-detect aCRF annotation type ====================
+    annotation_type_key = "unknown"
+    is_text_layer_missing = False
+    pdf_bytes = None
+
+    if pdf_file is not None:
+        pdf_bytes = pdf_file.getvalue()
+
+        # Auto-detect annotation readability in the MSG 2.0 context.
+        try:
+            import fitz
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            from modules.pymupdf_parser import detect_acrf_annotation_type, is_flattened_pdf
+            is_text_layer_missing, avg_text, text_layer_reason = is_flattened_pdf(doc)
+            annotation_profile = detect_acrf_annotation_type(doc)
+            doc.close()
+
+            annotation_type_key = annotation_profile.get("type_key", "unknown")
+            annotation_label = annotation_profile.get("label", "Unknown annotation type")
+            recommendation = annotation_profile.get("recommendation", "")
+            stats_line = (
+                f"Annotation objects: {annotation_profile.get('total_annots', 0)} | "
+                f"Readable /Contents: {annotation_profile.get('readable_annots', 0)} | "
+                f"Non-special readable: {annotation_profile.get('non_special_readable_annots', 0)} | "
+                f"Text layer: {'Missing/weak' if is_text_layer_missing else 'Present'} "
+                f"(avg {avg_text:.1f} chars/page)"
+            )
+
+            if annotation_type_key == "msg2_readable":
+                st.success(f"📊 aCRF Annotation Type: **{annotation_label}**\n\n{recommendation}")
+            elif annotation_type_key == "annotation_flattened":
+                st.warning(f"📊 aCRF Annotation Type: **{annotation_label}**\n\n{recommendation}")
+            else:
+                st.info(f"📊 aCRF Annotation Type: **{annotation_label}**\n\n{recommendation}")
+            st.caption(stats_line)
+        except Exception as e:
+            st.warning(f"Could not auto-detect aCRF annotation type: {str(e)}")
+            annotation_type_key = "unknown"
+
+    # ==================== Conditional checkbox logic ====================
     col1, col2 = st.columns(2)
+
     with col1:
-        use_opencv = st.checkbox("OpenCV + OCR", value=True, 
-                               help="Recommended for flattened PDFs")
+        if annotation_type_key == "annotation_flattened":
+            use_opencv = st.checkbox(
+                "OpenCV + OCR (Recommended)",
+                value=True,
+                help="Recommended: annotation objects are missing or not readable"
+            )
+        elif annotation_type_key == "partial_weak_annotation":
+            use_opencv = st.checkbox(
+                "OpenCV + OCR (Recommended for weak annotation layer)",
+                value=True,
+                help="Recommended: annotation layer is partial or weak"
+            )
+        else:
+            use_opencv = st.checkbox(
+                "OpenCV + OCR (Optional Verification)",
+                value=False,
+                help="Optional: use for double-verification of PyMuPDF results"
+            )
+
     with col2:
-        use_pymupdf = st.checkbox("PyMuPDF", value=True, 
-                                help="Recommended for non-flattened PDFs")
-    
+        if annotation_type_key == "annotation_flattened":
+            use_pymupdf = st.checkbox(
+                "PyMuPDF (Optional page-text check)",
+                value=False,
+                help="Optional: annotation objects are not readable; PyMuPDF may still read page text"
+            )
+        elif annotation_type_key == "partial_weak_annotation":
+            use_pymupdf = st.checkbox(
+                "PyMuPDF (Partial annotation layer)",
+                value=True,
+                help="Recommended together with OpenCV for weak annotation layers"
+            )
+        else:
+            use_pymupdf = st.checkbox(
+                "PyMuPDF (Recommended)",
+                value=True,
+                help="Default method when MSG 2.0 readable annotations are detected"
+            )
+
     if st.button("🔍 Extract Variables from PDF", type="primary"):
         if pdf_file is None:
             st.error("Please upload an aCRF PDF file first.")
         else:
             with st.spinner("Processing PDF..."):
                 results = {}
-                
+                pymupdf_result = None
+                opencv_result = None
+
+                # ==================== PyMuPDF extraction ====================
                 if use_pymupdf:
                     st.info("📖 Running PyMuPDF parser...")
                     try:
-                        from modules.pymupdf_parser import extract_variables_from_pdf
-                        pdf_bytes = pdf_file.getvalue()
-                        pymupdf_result = extract_variables_from_pdf(pdf_bytes)
+                        from modules.pymupdf_parser import extract_variables_from_pdf as pymupdf_extract
+                        pymupdf_result = pymupdf_extract(pdf_bytes)
                         results["pymupdf"] = pymupdf_result
-                        
+
                         if pymupdf_result["status"] == "success":
-                            if pymupdf_result["summary"].get("flattened_message"):
-                                st.warning(pymupdf_result["summary"]["flattened_message"])
-                            
-                            proc_time = pymupdf_result["summary"].get("processing_time_seconds", pymupdf_result["summary"].get("processing_time"))
-                            if proc_time is not None:
-                                st.success(f"✅ PyMuPDF completed in {proc_time}s")
-                            else:
-                                st.success("✅ PyMuPDF completed")
-                            
-                            # === 关键：立即保存到 session_state ===
-                            st.session_state.pymupdf_full_data = pymupdf_result["variables"].copy()
-                            st.session_state.pdf_result = results
-                            
+                            proc_time = pymupdf_result["summary"].get("processing_time_seconds",
+                                                                      pymupdf_result["summary"].get("processing_time"))
+                            st.success(f"✅ PyMuPDF completed in {proc_time}s ({len(pymupdf_result['variables'])} variables)")
                         else:
                             st.error(f"PyMuPDF Error: {pymupdf_result.get('error_message')}")
                     except Exception as e:
                         st.error(f"PyMuPDF failed: {str(e)}")
-                
-                st.session_state.pdf_results = results   # 额外备份
+
+                # ==================== OpenCV extraction ====================
+                if use_opencv:
+                    st.info("🖼️ Running OpenCV + OCR parser...")
+                    try:
+                        from modules.opencv_parser import (
+                            extract_variables_from_pdf as opencv_extract,
+                            is_tesseract_available
+                        )
+                        tesseract_ok, _ = is_tesseract_available()
+                        if not tesseract_ok:
+                            opencv_result = {
+                                "status": "error",
+                                "variables": [],
+                                "domain_annotations": [],
+                                "summary": {"total_variables": 0, "extraction_method": "opencv_ocr"},
+                                "error_message": "Tesseract OCR engine is not available. Please install Tesseract and add it to PATH."
+                            }
+                        else:
+                            opencv_result = opencv_extract(pdf_bytes)
+                        results["opencv"] = opencv_result
+
+                        if opencv_result["status"] == "success":
+                            proc_time = opencv_result["summary"].get("processing_time_seconds",
+                                                                     opencv_result["summary"].get("processing_time"))
+                            st.success(f"✅ OpenCV completed in {proc_time}s ({len(opencv_result['variables'])} variables)")
+
+                            # Display debug info
+                            debug = opencv_result.get("debug_info", {})
+                            if debug:
+                                with st.expander("🔍 OpenCV Debug Info (Detection & OCR Stats)"):
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("Total Boxes Detected", debug.get("total_boxes_detected", 0))
+                                    with col2:
+                                        st.metric("OCR Success", debug.get("ocr_success_count", 0))
+                                    with col3:
+                                        st.metric("OCR Failed", debug.get("ocr_fail_count", 0))
+                                    with col4:
+                                        st.metric("Variables Found", debug.get("variables_extracted", 0))
+
+                                    # Per-page breakdown
+                                    if debug.get("boxes_per_page"):
+                                        st.write("**Boxes per page:**")
+                                        pages_breakdown = debug.get("boxes_per_page", [])
+                                        for page_info in pages_breakdown[:50]:  # Show first 50 pages
+                                            if page_info.get("boxes_count", 0) > 0:
+                                                st.caption(f"Page {page_info.get('page')}: {page_info.get('boxes_count')} boxes")
+                        else:
+                            st.error(f"OpenCV Error: {opencv_result.get('error_message')}")
+                    except Exception as e:
+                        st.error(f"OpenCV failed: {str(e)}")
+
+                # ==================== Two-layer verification (if both parsers ran) ====================
+                if (
+                    pymupdf_result and opencv_result and use_pymupdf and use_opencv
+                    and pymupdf_result.get("status") == "success"
+                    and opencv_result.get("status") == "success"
+                ):
+                    st.divider()
+                    st.info("🔍 Running Two-Layer Verification (Consensus Check)")
+
+                    # Compare results
+                    from modules.comparator import compare_parser_results
+                    comparison = compare_parser_results(pymupdf_result, opencv_result)
+
+                    # Store in session
+                    st.session_state.parser_comparison = comparison
+                    st.session_state.pymupdf_full_data = comparison.get("consensus", [])
+                    st.session_state.verification_report = {
+                        "consensus_count": len(comparison.get("consensus", [])),
+                        "page_mismatch": comparison.get("page_mismatch", []),
+                        "pymupdf_only": comparison.get("pymupdf_only", []),
+                        "opencv_only": comparison.get("opencv_only", [])
+                    }
+
+                    # Display verification summary
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Consensus", len(comparison.get("consensus", [])),
+                                 help="Both parsers found the same variable on the same pages")
+                    with col2:
+                        st.metric("Page Mismatch", len(comparison.get("page_mismatch", [])),
+                                 help="Both parsers found the variable, but page sets or occurrence counts differ")
+                    with col3:
+                        st.metric("PyMuPDF Only", len(comparison.get("pymupdf_only", [])),
+                                 help="Only PyMuPDF found (likely valid)")
+                    with col4:
+                        st.metric("OpenCV Only", len(comparison.get("opencv_only", [])),
+                                 help="Only OpenCV found (verify manually)")
+
+                    st.success("✅ Verification complete. See results below.")
+
+                # ==================== Single parser (store results) ====================
+                elif pymupdf_result and pymupdf_result["status"] == "success":
+                    st.session_state.pymupdf_full_data = pymupdf_result["variables"].copy()
+                    st.session_state.pdf_result = results
+
+                elif opencv_result and opencv_result["status"] == "success":
+                    st.session_state.pymupdf_full_data = opencv_result["variables"].copy()
+                    st.session_state.pdf_result = results
+
+                st.session_state.pdf_results = results   # 备份
 
     # ====================== 显示结果区域（放在 button 外面） ======================
-    if "pymupdf_full_data" in st.session_state and st.session_state.pymupdf_full_data:
-        st.markdown("**PyMuPDF Extraction Result**")
-        
+
+    # Check if we have verification report (two-layer validation)
+    show_verification_details = False
+    if "parser_comparison" in st.session_state and st.session_state.parser_comparison:
+        show_verification_details = True
+        comparison = st.session_state.parser_comparison
+
+        def _preview_raw(value, max_len=220):
+            text = str(value or "").strip()
+            if len(text) > max_len:
+                return text[:max_len] + "..."
+            return text
+
+        st.divider()
+        st.subheader("📊 Two-Layer Verification Report")
+
+        # Show tabs for different categories
+        tab_consensus, tab_mismatch, tab_pymupdf, tab_opencv = st.tabs(
+            ["✅ Consensus", "⚠️ Page Mismatch", "⚠️ PyMuPDF Only", "❌ OpenCV Only"]
+        )
+
+        with tab_consensus:
+            consensus_data = comparison.get("consensus", [])
+            st.write(f"**{len(consensus_data)} variables confirmed by both parsers**")
+            if consensus_data:
+                # Display consensus table
+                display_consensus = []
+                for item in consensus_data[:800]:
+                    display_consensus.append({
+                        "Classification": "Variable",
+                        "Name": item.get("Variable", ""),
+                        "Pages": item.get("PageString", ""),
+                        "PageCount": item.get("PageCount", 0),
+                        "Category": item.get("Category", ""),
+                        "RawTexts": _preview_raw(item.get("RawTexts", "")),
+                        "PyMuPDF Pages": item.get("PyMuPDF_Pages", ""),
+                        "OpenCV Pages": item.get("OpenCV_Pages", "")
+                    })
+                st.dataframe(display_consensus, use_container_width=True)
+            else:
+                st.info("No consensus between parsers")
+
+        with tab_mismatch:
+            mismatch_data = comparison.get("page_mismatch", [])
+            st.warning(f"**{len(mismatch_data)} variables found by both parsers but with page differences**")
+            if mismatch_data:
+                display_mismatch = []
+                for item in mismatch_data[:800]:
+                    display_mismatch.append({
+                        "Classification": "Variable",
+                        "Name": item.get("Variable", ""),
+                        "Pages": item.get("PageString", ""),
+                        "PageCount": item.get("PageCount", 0),
+                        "Category": item.get("Category", ""),
+                        "MismatchReason": item.get("MismatchReason", ""),
+                        "PyMuPDF Pages": item.get("PyMuPDF_Pages", ""),
+                        "PyMuPDF PageCount": item.get("PyMuPDF_PageCount", ""),
+                        "OpenCV Pages": item.get("OpenCV_Pages", ""),
+                        "OpenCV PageCount": item.get("OpenCV_PageCount", ""),
+                        "RawTexts": _preview_raw(item.get("RawTexts", ""))
+                    })
+                st.dataframe(display_mismatch, use_container_width=True)
+            else:
+                st.info("No page mismatches between parsers")
+
+        with tab_pymupdf:
+            pymupdf_only = comparison.get("pymupdf_only", [])
+            st.write(f"**{len(pymupdf_only)} variables found only by PyMuPDF** (likely valid)")
+            if pymupdf_only:
+                display_only = []
+                for item in pymupdf_only[:800]:
+                    display_only.append({
+                        "Classification": "Variable",
+                        "Name": item.get("Variable", ""),
+                        "Pages": item.get("Pages", ""),
+                        "PageCount": item.get("PageCount", 0),
+                        "Category": item.get("Category", ""),
+                        "RawTexts": _preview_raw(item.get("RawTexts", ""))
+                    })
+                st.dataframe(display_only, use_container_width=True)
+            else:
+                st.info("No PyMuPDF-only variables")
+
+        with tab_opencv:
+            opencv_only = comparison.get("opencv_only", [])
+            st.warning(f"**{len(opencv_only)} variables found only by OpenCV** (verify manually)")
+            if opencv_only:
+                display_only = []
+                for item in opencv_only[:800]:
+                    display_only.append({
+                        "Classification": "Variable",
+                        "Name": item.get("Variable", ""),
+                        "Pages": item.get("Pages", ""),
+                        "PageCount": item.get("PageCount", 0),
+                        "Category": item.get("Category", ""),
+                        "RawTexts": _preview_raw(item.get("RawTexts", ""))
+                    })
+                st.dataframe(display_only, use_container_width=True)
+            else:
+                st.info("No OpenCV-only variables")
+
+    # Standard result display (if not two-layer verification)
+    if not show_verification_details and "pymupdf_full_data" in st.session_state and st.session_state.pymupdf_full_data:
+        st.markdown("**PDF Extraction Result**")
+
         full_data = st.session_state.pymupdf_full_data
-        
+
         # Summary
         total_vars = len(full_data)
         not_sub_count = sum(1 for x in full_data if x.get("Category") == "not_submitted")
         unknown_count = sum(1 for x in full_data if x.get("Category") == "unknown")
-        
+
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Total Variables", total_vars)
@@ -198,7 +467,7 @@ with tab2:
             st.metric("NOT SUBMITTED", not_sub_count)
         with col3:
             st.metric("Unknown", unknown_count)
-        
+
         # 搜索与视图控制
         search_term = st.text_input("🔍 Search Variable", "", key="search_var_pymupdf_stable")
         show_unmatched_only = st.checkbox(
@@ -206,12 +475,7 @@ with tab2:
             value=True,
             key="show_unmatched_only"
         )
-        show_match_level = st.checkbox(
-            "Show MatchLevel (debug)",
-            value=False,
-            key="show_match_level"
-        )
-        
+
         # 过滤
         if search_term.strip():
             filtered_data = [item for item in full_data if search_term.lower() in item["Variable"].lower()]
@@ -220,9 +484,9 @@ with tab2:
 
         if show_unmatched_only:
             filtered_data = [item for item in filtered_data if item.get("Category") == "unknown"]
-        
+
         st.write(f"**Showing {len(filtered_data)} / {total_vars} variables**")
-        
+
         # 是否在预览中展开 RawTexts
         expand_raw = st.checkbox("Expand RawTexts in preview (may be long)", value=False, key="expand_raw_preview")
 
@@ -259,8 +523,6 @@ with tab2:
                     "Category": "dataset_name",
                     "RawTexts": ""
                 })
-                if show_match_level:
-                    combined_list[-1]["MatchLevel"] = ""
 
         # Add variable entries
         for item in filtered_data[:800]:   # 限制显示数量，避免卡顿
@@ -288,8 +550,6 @@ with tab2:
                 "Category": item.get("Category", "unknown"),
                 "RawTexts": display_raw if display_raw else ""
             })
-            if show_match_level:
-                combined_list[-1]["MatchLevel"] = item.get("MatchLevel", "")
 
         combined_list.sort(
             key=lambda x: (
@@ -302,16 +562,14 @@ with tab2:
             st.table(combined_list)
         else:
             st.info("No matching annotations found.")
-        
+
         # 下载按钮（始终下载全部 + unmatched）
         if full_data or domain_ann:
             import csv
             import io
             import time
-            
+
             csv_fieldnames = ["Classification", "Name", "Pages", "PageCount", "Category", "RawTexts"]
-            if show_match_level:
-                csv_fieldnames.insert(5, "MatchLevel")
 
             def build_csv_bytes(variable_items, include_domains):
                 output = io.StringIO()
@@ -338,8 +596,6 @@ with tab2:
                             "Category": "dataset_name",
                             "RawTexts": ""
                         }
-                        if show_match_level:
-                            row["MatchLevel"] = ""
                         rows.append(row)
 
                 for item in variable_items:
@@ -356,8 +612,6 @@ with tab2:
                         "Category": item.get("Category", "unknown"),
                         "RawTexts": csv_raw
                     }
-                    if show_match_level:
-                        row["MatchLevel"] = item.get("MatchLevel", "")
                     rows.append(row)
 
                 rows.sort(
@@ -374,7 +628,7 @@ with tab2:
             csv_bytes = build_csv_bytes(full_data, include_domains=True)
             unknown_items = [item for item in full_data if item.get("Category") == "unknown"]
             unknown_csv_bytes = build_csv_bytes(unknown_items, include_domains=False)
-            
+
             st.download_button(
                 label="📥 Download Full Result as CSV",
                 data=csv_bytes,
@@ -393,14 +647,14 @@ with tab2:
 # ====================== Tab 3: Cross Validation ======================
 with tab3:
     st.subheader("3. Cross Validation")
-    
+
     st.markdown("**Select Comparison Methods**")
     col_a, col_b = st.columns(2)
     with col_a:
         cmp_opencv = st.checkbox("XML vs OpenCV", value=True)
     with col_b:
         cmp_pymupdf = st.checkbox("XML vs PyMuPDF", value=True)
-    
+
     if st.button("⚖️ Start Cross Validation", type="primary"):
         xml_result = st.session_state.get("xml_result")
         pdf_results = st.session_state.get("pdf_results")

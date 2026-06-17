@@ -1,4 +1,4 @@
-﻿import fitz  # PyMuPDF
+import fitz  # PyMuPDF
 import re
 import time
 from typing import Dict, List, Any, Set, Tuple
@@ -16,18 +16,18 @@ DEFAULT_STOPWORDS = {"AND","OR","IF","THEN","THE","A","IN","ON","FOR","WITH","IS
 def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, float, str]:
     """
     Detect if PDF is flattened (text layer missing or very weak).
-    
+
     Args:
         doc: PyMuPDF document
         threshold: Character count threshold per page
-    
+
     Returns:
         Tuple of (is_flattened: bool, avg_text_per_page: float, reason: str)
     """
     total_text = 0
     total_words = 0
     pages_with_text = 0
-    
+
     for page in doc:
         text = page.get_text("text").strip()
         words = len(text.split())
@@ -35,35 +35,100 @@ def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, 
         total_words += words
         if len(text) > 50:
             pages_with_text += 1
-    
+
     num_pages = len(doc)
     avg_text = total_text / num_pages if num_pages > 0 else 0
     avg_words = total_words / num_pages if num_pages > 0 else 0
-    
+
     is_flattened = (
         avg_text < threshold or
         avg_words < 25 or
         (pages_with_text / num_pages < 0.3 if num_pages > 0 else True)
     )
-    
+
     reason = ""
     if is_flattened:
         if avg_text < 50:
             reason = "Very few text layers detected (highly likely flattened PDF)"
         else:
             reason = "Weak text layer detected, likely flattened PDF"
-    
+
     return is_flattened, avg_text, reason
+
+
+def detect_acrf_annotation_type(doc: fitz.Document) -> Dict[str, Any]:
+    """
+    Classify aCRF annotation readability in the SDTM MSG 2.0 context.
+
+    This intentionally checks PDF annotation objects and their /Contents fields,
+    not whether the base PDF page text layer is readable.
+    """
+    total_annots = 0
+    readable_annots = 0
+    non_special_readable_annots = 0
+    pages_with_readable_annots = 0
+
+    for page in doc:
+        page_readable_count = 0
+        ann = page.first_annot
+        while ann is not None:
+            total_annots += 1
+            content = ann.info.get("content", "").strip()
+            if content:
+                cleaned = re.sub(r'\(\s*[A-Za-z\s]{0,3}\s*\)', '', content)
+                cleaned = re.sub(r'^\(\s*[^)]{0,15}\)\s*', '', cleaned)
+                cleaned = re.sub(r'^\(\s*[^)]{1,15}\s+', '', cleaned)
+                cleaned = re.sub(r'^\(\s*', '', cleaned)
+                cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+                if cleaned:
+                    readable_annots += 1
+                    page_readable_count += 1
+                    if "NOT SUBMITTED" not in cleaned.upper():
+                        non_special_readable_annots += 1
+            ann = ann.next
+
+        if page_readable_count:
+            pages_with_readable_annots += 1
+
+    total_pages = len(doc)
+    readable_ratio = readable_annots / total_annots if total_annots else 0
+    readable_page_ratio = pages_with_readable_annots / total_pages if total_pages else 0
+
+    if total_annots == 0 or readable_annots == 0:
+        type_key = "annotation_flattened"
+        label = "Annotation-flattened PDF detected"
+        recommendation = "Use OpenCV + OCR as the primary parser."
+    elif readable_ratio >= 0.8 and non_special_readable_annots >= 5:
+        type_key = "msg2_readable"
+        label = "MSG 2.0 readable annotations detected"
+        recommendation = "Use PyMuPDF as the primary parser; OpenCV is optional verification."
+    else:
+        type_key = "partial_weak_annotation"
+        label = "Partial/weak annotation layer detected"
+        recommendation = "Run both PyMuPDF and OpenCV + OCR, then review differences."
+
+    return {
+        "type_key": type_key,
+        "label": label,
+        "recommendation": recommendation,
+        "total_pages": total_pages,
+        "total_annots": total_annots,
+        "readable_annots": readable_annots,
+        "non_special_readable_annots": non_special_readable_annots,
+        "pages_with_readable_annots": pages_with_readable_annots,
+        "readable_ratio": readable_ratio,
+        "readable_page_ratio": readable_page_ratio,
+    }
 
 
 def extract_annotation_regions(page: fitz.Page) -> Dict[str, Any]:
     """
     Extract text from annotation /Contents fields (MSG 2.0 compliant).
-    
+
     Strategy: Extract from annotation /Contents field ONLY.
     - If annotation has /Contents: use it (clean, structurally sound)
     - If annotation has no /Contents: mark for OCR processing (skip coordinate clipping)
-    
+
     Returns:
         Dict with:
         - "texts": List of successfully extracted annotation texts
@@ -78,7 +143,7 @@ def extract_annotation_regions(page: fitz.Page) -> Dict[str, Any]:
             try:
                 # Preferred: Read /Contents field (MSG 2.0 compliant, structurally sound)
                 content = ann.info.get("content", "").strip()
-                
+
                 if content:
                     # Clean up very short parenthetical markers
                     cleaned = content
@@ -87,7 +152,7 @@ def extract_annotation_regions(page: fitz.Page) -> Dict[str, Any]:
                     cleaned = re.sub(r'^\(\s*[^)]{1,15}\s+', '', cleaned)
                     cleaned = re.sub(r'^\(\s*', '', cleaned)
                     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
-                    
+
                     if cleaned:
                         annotation_texts.append(cleaned)
                 else:
@@ -123,15 +188,15 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
     - 'AEPTRTPT in SUPPAE'
     - 'SUPPAE.AEPTRTPT'
     - 'AEPTRTPT in SUPPxx'
-    
+
     Args:
         text: Annotation text to parse
-    
+
     Returns:
         List of (variable, dataset) tuples
     """
     results = []
-    
+
     # Pattern 1: "VAR in SUPPYY" or "VAR in SUPPxx"
     pattern1 = r'([A-Z][A-Z0-9]*?)\s+in\s+(SUPP[A-Z]{2,})'
     for match in re.finditer(pattern1, text):
@@ -139,7 +204,7 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
         dataset = match.group(2)
         if var and dataset and len(var) <= 8 and len(dataset) <= 8:
             results.append((var, dataset))
-    
+
     # Pattern 2: "SUPPYY.VAR"
     pattern2 = r'(SUPP[A-Z]{2,})\.([A-Z][A-Z0-9]*?)(?:\s|$|[,;])'
     for match in re.finditer(pattern2, text):
@@ -147,7 +212,7 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
         var = match.group(2)
         if var and dataset and len(var) <= 8 and len(dataset) <= 8:
             results.append((var, dataset))
-    
+
     return results
 
 
@@ -195,10 +260,10 @@ def extract_candidates(text: str) -> Set[str]:
     Extract candidate terms (potential variable/dataset names) from text.
     Uses capitalization rule and length constraints.
     More conservative approach to reduce false positives.
-    
+
     Args:
         text: Text to extract from
-    
+
     Returns:
         Set of candidate terms
     """
@@ -219,10 +284,10 @@ def extract_candidates(text: str) -> Set[str]:
             if start <= pos < end:
                 return True
         return False
-    
+
     # Rule: Capitalized terms (all caps)
     # Length: 2-8 characters (standard SDTM constraint)
-    
+
     # Pattern 1: All-caps words surrounded by boundaries
     # Match sequences of uppercase letters and digits (2-8 chars)
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\b', text):
@@ -237,7 +302,7 @@ def extract_candidates(text: str) -> Set[str]:
             if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
                 continue
             candidates.add(token)
-    
+
     # Pattern 2: Explicit variable references in conditions
     # "VAR when", "VAR if", "VAR then", "VAR =", "VAR :", etc
     for match in re.finditer(r'\b([A-Z][A-Z0-9]{1,7})\s+(?:when|if|then|=|:|;|,)', text):
@@ -250,11 +315,11 @@ def extract_candidates(text: str) -> Set[str]:
             if token.upper() in DEFAULT_STOPWORDS or token.upper() in CONFIG.get("blacklist", set()):
                 continue
             candidates.add(token)
-    
+
     return candidates
 
 
-def classify_term(term: str, raw_context: str, standard_terms: Dict, 
+def classify_term(term: str, raw_context: str, standard_terms: Dict,
                   suffix_prefix_patterns: Dict, blacklist: Set) -> Tuple[str, str]:
     """
     Classify a term and return (category, match_level).
@@ -315,21 +380,21 @@ def extract_not_submitted_entries(text: str, page_idx: int) -> List[Dict[str, An
     """
     Extract all NOT SUBMITTED occurrences with case insensitivity.
     Returns aggregated count per page to avoid duplication of the same pattern.
-    
+
     Args:
         text: Text to search
         page_idx: Page number (1-indexed)
-    
+
     Returns:
         List of NOT SUBMITTED entries with counts
     """
     entries = []
-    
+
     # Case-insensitive patterns for NOT SUBMITTED
     # Search for variations
     pattern = re.compile(r'\b(?:NOT\s+SUBMITTED|NOTSUBMITTED)\b', re.IGNORECASE)
     matches = pattern.findall(text)
-    
+
     if matches:
         total_count = len(matches)
         entries.append({
@@ -337,24 +402,24 @@ def extract_not_submitted_entries(text: str, page_idx: int) -> List[Dict[str, An
             "Page": page_idx,
             "Count": total_count
         })
-    
+
     return entries
 
 
 def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
     """
     Main PyMuPDF parser focusing on annotation-based variable extraction.
-    
+
     Workflow:
     1. Detect if PDF is flattened
     2. For each page, extract ONLY annotation regions (no fallback to full text)
     3. Extract candidate terms from annotations using capitalization rules
     4. Classify each term using 6-level priority matching
     5. Aggregate results per variable with complete page lists
-    
+
     Args:
         pdf_bytes: PDF file content as bytes
-    
+
     Returns:
         Dict with structure:
         {
@@ -367,10 +432,10 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
     """
     start_time = time.time()
     doc = None
-    
+
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        
+
         # Flattened PDF detection
         is_flattened, avg_text, flatten_reason = is_flattened_pdf(doc)
         flattened_message = None
@@ -379,12 +444,12 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 f"Flattened PDF detected (avg text: {avg_text:.1f} chars/page). {flatten_reason}. "
                 "Recommend using OpenCV + OCR as well."
             )
-        
+
         # Load config
         standard_terms = CONFIG.get("standard_terms", {"variable": set(), "dataset": set()})
         suffix_prefix_patterns = CONFIG.get("suffix_prefix_patterns", {"variable": set(), "dataset": set()})
         blacklist = CONFIG.get("blacklist", set())
-        
+
         # Result containers
         # Map: term -> {"pages": set, "raw_contexts": list, "category": str, "flag": str}
         variable_index = defaultdict(lambda: {
@@ -396,26 +461,26 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
 
         # Domain annotations: domain -> set(pages)
         domain_index = defaultdict(set)
-        
+
         # Separate tracking for NOT SUBMITTED
         not_submitted_entries = []
-        
+
         # Process each page
         for page_num in range(len(doc)):
             page = doc[page_num]
             page_idx = page_num + 1
-            
+
             # ==================== Extract annotation regions ====================
             annot_result = extract_annotation_regions(page)
             annotation_texts = annot_result.get("texts", [])
             need_ocr = annot_result.get("need_ocr", [])
-            
-            
+
+
             # ==================== Extract NOT SUBMITTED entries ====================
             full_page_text = page.get_text("text")
             not_sub_list = extract_not_submitted_entries(full_page_text, page_idx)
             not_submitted_entries.extend(not_sub_list)
-            
+
             # ==================== Process each annotation ====================
             for ann_text in annotation_texts:
                 if not ann_text.strip():
@@ -439,7 +504,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
 
                 # Extract candidate terms
                 candidates = extract_candidates(ann_text)
-                
+
                 # Try to extract SUPP-related variables first
                 supp_pairs = parse_supp_variable(ann_text)
                 for var, dataset in supp_pairs:
@@ -481,15 +546,15 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         }
                         if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
                             variable_index[pair_text]["category"] = category
-                 
+
                 # Classify each candidate
                 for candidate in candidates:
                     if not candidate or len(candidate) < 2 or len(candidate) > 8:
                         continue
-                    
+
                     upper_cand = candidate.upper()
                     category, match_level = classify_term(
-                        upper_cand, ann_text, standard_terms, 
+                        upper_cand, ann_text, standard_terms,
                         suffix_prefix_patterns, blacklist
                     )
 
@@ -533,12 +598,12 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         }
                         if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
                             variable_index[upper_cand]["category"] = category
-        
+
         # ==================== Build final variable list ====================
         variables_list = []
         for var, info in sorted(variable_index.items()):
             pages = sorted(info["pages"])
-            
+
             # Deduplicate raw contexts while preserving order
             unique_raw = []
             seen_raw = set()
@@ -556,7 +621,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "Category": info["category"],
                 "MatchLevel": info.get("match_level", "none")
             })
-        
+
         # ==================== Build domain annotation list ====================
         domain_list = []
         for dom, pages in sorted(domain_index.items()):
@@ -587,12 +652,12 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 "Category": "not_submitted",
                 "MatchLevel": ""
             })
-        
+
         # Combine variable list with NOT SUBMITTED entries
         final_variables = variables_list + not_sub_list
-        
+
         elapsed = round(time.time() - start_time, 2)
-        
+
         return {
             "status": "success",
             "variables": final_variables,
@@ -609,7 +674,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             },
             "error_message": None
         }
-    
+
     except Exception as e:
         elapsed = round(time.time() - start_time, 2)
         return {
@@ -620,7 +685,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             },
             "error_message": str(e)
         }
-    
+
     finally:
         if doc is not None:
             doc.close()
@@ -628,5 +693,4 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     print("âœ… PyMuPDF Parser Module Loaded Successfully (v2.0 - Annotation-focused)")
-
 

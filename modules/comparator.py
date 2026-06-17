@@ -12,7 +12,7 @@ from __future__ import annotations
 import csv
 import io
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 # Diff types
@@ -141,15 +141,15 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
     Supported patterns:
     1. Simple: target_var
        Example: FAORRES
-    
+
     2. 4-part VLM (qualifier with value, no operator):
        target_var.dataset.qualifier.value
        Example: DSSTDTC.DS.DSDECOD.INFORMED CONSENT OBTAINED
-    
+
     3. 5-part VLM with operator (EQ/IN):
        target_var.dataset.qualifier.operator.value
        Example: IEORRES.IE.IETESTCD.EQ.I03V020
-    
+
     4. Multi-criteria (multiple dataset.qualifier.value sequences):
        target_var.dataset.qualifier.value.dataset.qualifier.value...
        Example: FAORRES.FA.FATESTCD.CLNRSPC.FA.FACAT.1.FA.FASCAT.2
@@ -204,12 +204,12 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
             return parsed
 
     if len(parts) >= 7:
-        if (parts[0] and 
+        if (parts[0] and
             (len(parts) - 1) % 3 == 0):
             target_var = parts[0]
             criteria = []
             valid = True
-            
+
             for i in range(1, len(parts), 3):
                 if i + 2 < len(parts):
                     dataset = parts[i]
@@ -224,7 +224,7 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
                     else:
                         valid = False
                         break
-            
+
             if valid and criteria:
                 qualifier_keys = [f"{c['qualifier']}={c['value']}" for c in criteria]
                 parsed.update(
@@ -573,3 +573,176 @@ def rows_to_csv_bytes(rows: List[Dict[str, Any]], fieldnames: List[str]) -> byte
     for row in rows:
         writer.writerow(row)
     return output.getvalue().encode("utf-8")
+
+
+def compare_parser_results(pymupdf_result: Dict[str, Any],
+                          opencv_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compare extraction results from PyMuPDF and OpenCV parsers.
+
+    Returns consensus, PyMuPDF-only, and OpenCV-only variables.
+
+    Args:
+        pymupdf_result: Result dict from extract_variables_from_pdf (PyMuPDF)
+        opencv_result: Result dict from extract_variables_from_pdf (OpenCV)
+
+    Returns:
+        {
+            "consensus": [...],      # Both found same variable
+            "pymupdf_only": [...],   # Only PyMuPDF found
+            "opencv_only": [...],    # Only OpenCV found
+            "summary": {...}
+        }
+    """
+    try:
+        # Extract variable names from both results
+        pymupdf_vars = {}
+        if pymupdf_result.get("status") == "success":
+            for var in pymupdf_result.get("variables", []):
+                var_name = var.get("Variable", "")
+                if var_name:
+                    pymupdf_vars[var_name.upper()] = var
+
+        opencv_vars = {}
+        if opencv_result.get("status") == "success":
+            for var in opencv_result.get("variables", []):
+                var_name = var.get("Variable", "")
+                if var_name:
+                    opencv_vars[var_name.upper()] = var
+
+        # Find consensus, page mismatches, differences
+        consensus = []
+        page_mismatch = []
+        pymupdf_only = []
+        opencv_only = []
+
+        def normalize_pages(value: Any) -> List[int]:
+            if isinstance(value, list):
+                raw_pages = value
+            elif isinstance(value, str):
+                raw_pages = [part.strip() for part in value.split(",") if part.strip()]
+            else:
+                raw_pages = []
+            pages = []
+            for page in raw_pages:
+                try:
+                    pages.append(int(page))
+                except (TypeError, ValueError):
+                    continue
+            return pages
+
+        def raw_text_display(entry: Dict[str, Any]) -> str:
+            raw_texts = entry.get("RawTexts", [])
+            if isinstance(raw_texts, list):
+                return " | ".join(str(x) for x in raw_texts if x)
+            return str(raw_texts) if raw_texts else ""
+
+        # Variables found in both
+        for var_name in sorted(pymupdf_vars.keys()):
+            if var_name in opencv_vars:
+                # Both found it - merge pages
+                pymupdf_entry = pymupdf_vars[var_name]
+                opencv_entry = opencv_vars[var_name]
+
+                # Compare pages. Regular variables require matching page sets.
+                # NOT SUBMITTED is occurrence-based, so compare duplicate page counts too.
+                pymupdf_pages_list = normalize_pages(pymupdf_entry.get("Pages", []))
+                opencv_pages_list = normalize_pages(opencv_entry.get("Pages", []))
+                pymupdf_pages = set(pymupdf_pages_list)
+                opencv_pages = set(opencv_pages_list)
+                all_pages = sorted(pymupdf_pages | opencv_pages)
+                page_set_match = pymupdf_pages == opencv_pages
+                is_not_submitted = (
+                    var_name == "NOT SUBMITTED"
+                    or pymupdf_entry.get("Category") == "not_submitted"
+                    or opencv_entry.get("Category") == "not_submitted"
+                )
+                occurrence_match = True
+                if is_not_submitted:
+                    occurrence_match = Counter(pymupdf_pages_list) == Counter(opencv_pages_list)
+
+                pymupdf_raw = pymupdf_entry.get("RawTexts", [])
+                opencv_raw = opencv_entry.get("RawTexts", [])
+                if not isinstance(pymupdf_raw, list):
+                    pymupdf_raw = [str(pymupdf_raw)] if pymupdf_raw else []
+                if not isinstance(opencv_raw, list):
+                    opencv_raw = [str(opencv_raw)] if opencv_raw else []
+                merged_raw = []
+                seen_raw = set()
+                for raw in pymupdf_raw + opencv_raw:
+                    if raw and raw not in seen_raw:
+                        seen_raw.add(raw)
+                        merged_raw.append(raw)
+
+                common_record = {
+                    "Variable": var_name,
+                    "Pages": all_pages,
+                    "PageString": ",".join(map(str, all_pages)),
+                    "PageCount": len(all_pages),
+                    "PyMuPDF_Pages": pymupdf_entry.get("PageString", ""),
+                    "OpenCV_Pages": opencv_entry.get("PageString", ""),
+                    "Category": pymupdf_entry.get("Category", "unknown"),
+                    "RawTexts": " | ".join(merged_raw)
+                }
+                if page_set_match and occurrence_match:
+                    consensus.append(common_record)
+                else:
+                    mismatch_reason = "page_set_mismatch"
+                    if is_not_submitted and page_set_match and not occurrence_match:
+                        mismatch_reason = "occurrence_count_mismatch"
+                    elif is_not_submitted and not occurrence_match:
+                        mismatch_reason = "page_or_occurrence_mismatch"
+                    common_record["MismatchReason"] = mismatch_reason
+                    common_record["PyMuPDF_PageCount"] = len(pymupdf_pages_list)
+                    common_record["OpenCV_PageCount"] = len(opencv_pages_list)
+                    page_mismatch.append(common_record)
+
+        # Variables only in PyMuPDF
+        for var_name, entry in sorted(pymupdf_vars.items()):
+            if var_name not in opencv_vars:
+                pymupdf_only.append({
+                    "Variable": var_name,
+                    "Pages": entry.get("PageString", ""),
+                    "PageCount": entry.get("PageCount", 0),
+                    "Category": entry.get("Category", "unknown"),
+                    "RawTexts": raw_text_display(entry)
+                })
+
+        # Variables only in OpenCV
+        for var_name, entry in sorted(opencv_vars.items()):
+            if var_name not in pymupdf_vars:
+                opencv_only.append({
+                    "Variable": var_name,
+                    "Pages": entry.get("PageString", ""),
+                    "PageCount": entry.get("PageCount", 0),
+                    "Category": entry.get("Category", "unknown"),
+                    "RawTexts": raw_text_display(entry)
+                })
+
+        return {
+            "status": "success",
+            "consensus": consensus,
+            "page_mismatch": page_mismatch,
+            "pymupdf_only": pymupdf_only,
+            "opencv_only": opencv_only,
+            "summary": {
+                "consensus_count": len(consensus),
+                "page_mismatch_count": len(page_mismatch),
+                "pymupdf_only_count": len(pymupdf_only),
+                "opencv_only_count": len(opencv_only),
+                "total_pymupdf": len(pymupdf_vars),
+                "total_opencv": len(opencv_vars)
+            },
+            "error_message": None
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "consensus": [],
+            "page_mismatch": [],
+            "pymupdf_only": [],
+            "opencv_only": [],
+            "summary": {},
+            "error_message": str(e)
+        }
