@@ -21,14 +21,14 @@ This guide explains each result element in Cross Validation, especially:
     `extra_domain`
     `unmapped_variable`             
 
-4. **Compound XML variables are supported**:
+4. **VLM (Value Level Metadata) XML variables are supported**:
    for a pattern like `A.B.C.EQ.V`, e.g.`DDORRES.DD.DDTESTCD.EQ.AUTOPIND`:
    - `A` = target variable
    - `B` = dataset/domain
    - `C` = qualifier variable
    - `EQ/IN` = operator
-   - `V` = value
-   A compound XML variable can match PyMuPDF through two paths:
+   - `V` = value (VLM expansion)
+   A VLM XML variable can match PyMuPDF through two paths:
    - `path_A_target_var`: match `A`
    - `path_B_qualifier_value`: match `C=V`
 
@@ -36,14 +36,14 @@ This guide explains each result element in Cross Validation, especially:
 
 ## 2. Meaning of Common Result Examples
 
-### A) `COMPOUND_RESOLVED relation: exact path: path_A_target_var`
+### A) `VLM_RESOLVED relation: exact path: path_A_target_var`
 
 Meaning:
-- XML item is a compound variable (e.g. `DDORRES.DD.DDTESTCD.EQ.AUTOPIND`)
+- XML item is a VLM (Value Level Metadata) variable (e.g. `DDORRES.DD.DDTESTCD.EQ.AUTOPIND`)
 - it was matched through Path A (`DDORRES`) in PyMuPDF
 - page sets are exactly the same (`relation=exact`)
 
-Conclusion: **matched successfully through compound resolution**
+Conclusion: **matched successfully through VLM resolution**
 
 ---
 
@@ -74,10 +74,10 @@ Conclusion: **matched variable, but page mismatch**
 | diff_type | Meaning | Treated as pass |
 |---|---|---|
 | `MATCH` | Simple variable matched and pages are identical | Yes |
-| `COMPOUND_RESOLVED` | Compound variable matched through path A or B, with identical pages | Yes |
+| `VLM_RESOLVED` | VLM variable matched through path A or B, with identical pages | Yes |
 | `PAGE_MISMATCH` | Variable matched but page sets differ | No |
 | `MISSING_IN_PDF` | XML has the item but PDF has no match | No |
-| `LOW_CONFIDENCE` | XML variable format cannot be reliably parsed as simple/compound | No (manual review) |
+| `LOW_CONFIDENCE` | XML variable format cannot be reliably parsed as simple/VLM | No (manual review) |
 | `EXTRA_IN_PDF` | Item appears only in PDF (shown in extra outputs) | Not part of XML main pass rate |
 
 > Note: `EXTRA_IN_PDF` mainly appears in extra outputs, not as XML-anchored main detail rows.

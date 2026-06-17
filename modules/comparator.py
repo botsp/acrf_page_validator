@@ -17,13 +17,13 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 # Diff types
 DIFF_MATCH = "MATCH"
-DIFF_COMPOUND_RESOLVED = "COMPOUND_RESOLVED"
+DIFF_VLM_RESOLVED = "VLM_RESOLVED"
 DIFF_PAGE_MISMATCH = "PAGE_MISMATCH"
 DIFF_MISSING_IN_PDF = "MISSING_IN_PDF"
 DIFF_EXTRA_IN_PDF = "EXTRA_IN_PDF"
 DIFF_LOW_CONFIDENCE = "LOW_CONFIDENCE"
 
-_COMPOUND_OPERATORS = {"EQ", "IN"}
+_VLM_OPERATORS = {"EQ", "IN"}
 _PAGE_RELATION_RANK = {
     "exact": 4,
     "pdf_superset": 3,
@@ -142,11 +142,11 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
     1. Simple: target_var
        Example: FAORRES
     
-    2. 4-part compound (qualifier with value, no operator):
+    2. 4-part VLM (qualifier with value, no operator):
        target_var.dataset.qualifier.value
        Example: DSSTDTC.DS.DSDECOD.INFORMED CONSENT OBTAINED
     
-    3. 5-part compound with operator (EQ/IN):
+    3. 5-part VLM with operator (EQ/IN):
        target_var.dataset.qualifier.operator.value
        Example: IEORRES.IE.IETESTCD.EQ.I03V020
     
@@ -173,12 +173,12 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
         parsed["target_var"] = parts[0]
         return parsed
 
-    if len(parts) >= 5 and parts[3] in _COMPOUND_OPERATORS:
+    if len(parts) >= 5 and parts[3] in _VLM_OPERATORS:
         value = ".".join(parts[4:]).strip()
         if parts[0] and parts[1] and parts[2] and value:
             parsed.update(
                 {
-                    "kind": "compound",
+                    "kind": "vlm",
                     "target_var": parts[0],
                     "dataset": parts[1],
                     "qualifier": parts[2],
@@ -193,7 +193,7 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
         if parts[0] and parts[1] and parts[2] and parts[3]:
             parsed.update(
                 {
-                    "kind": "compound",
+                   "kind": "vlm",
                     "target_var": parts[0],
                     "dataset": parts[1],
                     "qualifier": parts[2],
@@ -403,7 +403,7 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
                 "Dataset": "",
                 "XML_Variable_Count": 0,
                 DIFF_MATCH: 0,
-                DIFF_COMPOUND_RESOLVED: 0,
+                DIFF_VLM_RESOLVED: 0,
                 DIFF_PAGE_MISMATCH: 0,
                 DIFF_MISSING_IN_PDF: 0,
                 DIFF_LOW_CONFIDENCE: 0,
@@ -421,7 +421,7 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
             dataset_bucket["XML_Variable_Count"] += 1
 
             candidates: List[Tuple[str, str]] = []
-            if parsed["kind"] == "compound":
+            if parsed["kind"] == "vlm":
                 if parsed["target_var"]:
                     candidates.append((parsed["target_var"], "path_A_target_var"))
                     xml_candidate_names.add(parsed["target_var"])
@@ -452,7 +452,7 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
 
             if parsed["kind"] == "low_confidence":
                 diff_type = DIFF_LOW_CONFIDENCE
-                note = "Unable to parse XML variable into simple or 5-part compound pattern."
+                note = "Unable to parse XML variable into simple or VLM pattern."
             else:
                 best_match = _choose_best_pdf_match(row["pages_set"], candidates, pdf_var_index)
                 if best_match is None:
@@ -467,8 +467,8 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
                     match_path = best_match["match_path"]
                     if page_subset == "exact":
                         diff_type = (
-                            DIFF_COMPOUND_RESOLVED
-                            if parsed["kind"] in ("compound", "multi_criteria")
+                            DIFF_VLM_RESOLVED
+                            if parsed["kind"] in ("vlm", "multi_criteria")
                             else DIFF_MATCH
                         )
                     else:
@@ -534,8 +534,8 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
             "total_pdf_variables": len(pdf_var_index),
             "total_pdf_domains": len(pdf_domain_index),
             "matched": sum(1 for row in detail_rows if row["diff_type"] == DIFF_MATCH),
-            "compound_resolved": sum(
-                1 for row in detail_rows if row["diff_type"] == DIFF_COMPOUND_RESOLVED
+            "vlm_resolved": sum(
+                1 for row in detail_rows if row["diff_type"] == DIFF_VLM_RESOLVED
             ),
             "page_mismatch": sum(1 for row in detail_rows if row["diff_type"] == DIFF_PAGE_MISMATCH),
             "missing_in_pdf": sum(1 for row in detail_rows if row["diff_type"] == DIFF_MISSING_IN_PDF),
