@@ -13,8 +13,6 @@ This guide explains each result element in Cross Validation, especially:
 1. **XML is the source of truth**: only XML records with page references are included in the main comparison.
 2. **Variable-level comparison first**: the main check is variable matching and page consistency.
 3. The Cross Validation results may contain too many categories, making it difficult to quickly grasp all elements. This is because the categories parsed from acrf.pdf are already numerous, and the XML cross-validation introduces even more classifications. Keeping the detailed categories is helpful for locating differences. However, please prioritize alerts associated with the following keywords, as they are **_directly related to differences_**.
-   
-   ―――――――――――――――――――――――――――――――――――――――――――――――
 
    **Recommended priority, from highest to lowest:**
    
