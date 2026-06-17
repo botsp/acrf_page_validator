@@ -14,12 +14,15 @@ This guide explains each result element in Cross Validation, especially:
 2. **Variable-level comparison first**: the main check is variable matching and page consistency.
 3. The Cross Validation results may contain too many categories, making it difficult to quickly grasp all elements. This is because the categories parsed from acrf.pdf are already numerous, and the XML cross-validation introduces even more classifications. Keeping the detailed categories is helpful for locating differences. However, please prioritize alerts associated with the following keywords, as they are **directly related to differences**.
 
-    Recommended priority, from highest to lowest:             
-    `PAGE_MISMATCH`             
-    `MISSING_IN_PDF`             
-    `LOW_CONFIDENCE`             
-    `extra_domain`
-    `unmapped_variable`             
+   **Recommended priority, from highest to lowest:**
+   
+   | Priority | Alert Type | Action |
+   |---|---|---|
+   | 🔴 Critical | `PAGE_MISMATCH` | Pages in PDF don't match XML specification |
+   | 🔴 Critical | `MISSING_IN_PDF` | Variable exists in XML but not found in PDF |
+   | 🟠 High | `LOW_CONFIDENCE` | Pattern parsing failed; please manually check in source files |
+   | 🟡 Medium | `extra_domain` | Domain appears in PDF but not in XML; please manually cross-check in CSDRG |
+   | 🟡 Medium | `unmapped_variable` | Variable appears in PDF but not in XML; please manually cross-check in CSDRG |
 
 4. **VLM (Value Level Metadata) XML variables are supported**:
    for a pattern like `A.B.C.EQ.V`, e.g.`DDORRES.DD.DDTESTCD.EQ.AUTOPIND`:
