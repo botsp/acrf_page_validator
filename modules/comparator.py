@@ -138,10 +138,21 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
     """
     Parse Define XML variable pattern.
 
-    Supported compound pattern:
-        target_var.dataset.qualifier.operator.value
-    Example:
-        IEORRES.IE.IETESTCD.EQ.I03V020
+    Supported patterns:
+    1. Simple: target_var
+       Example: FAORRES
+    
+    2. 4-part compound (qualifier with value, no operator):
+       target_var.dataset.qualifier.value
+       Example: DSSTDTC.DS.DSDECOD.INFORMED CONSENT OBTAINED
+    
+    3. 5-part compound with operator (EQ/IN):
+       target_var.dataset.qualifier.operator.value
+       Example: IEORRES.IE.IETESTCD.EQ.I03V020
+    
+    4. Multi-criteria (multiple dataset.qualifier.value sequences):
+       target_var.dataset.qualifier.value.dataset.qualifier.value...
+       Example: FAORRES.FA.FATESTCD.CLNRSPC.FA.FACAT.1.FA.FASCAT.2
     """
     normalized = _normalize_text(variable_name)
     parts = [segment.strip() for segment in normalized.split(".") if segment.strip()]
@@ -155,6 +166,7 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
         "operator": "",
         "value": "",
         "qualifier_key": "",
+        "criteria": [],
     }
 
     if len(parts) == 1:
@@ -176,6 +188,54 @@ def _parse_define_variable(variable_name: str) -> Dict[str, str]:
                 }
             )
             return parsed
+
+    if len(parts) == 4:
+        if parts[0] and parts[1] and parts[2] and parts[3]:
+            parsed.update(
+                {
+                    "kind": "compound",
+                    "target_var": parts[0],
+                    "dataset": parts[1],
+                    "qualifier": parts[2],
+                    "value": parts[3],
+                    "qualifier_key": f"{parts[2]}={parts[3]}",
+                }
+            )
+            return parsed
+
+    if len(parts) >= 7:
+        if (parts[0] and 
+            (len(parts) - 1) % 3 == 0):
+            target_var = parts[0]
+            criteria = []
+            valid = True
+            
+            for i in range(1, len(parts), 3):
+                if i + 2 < len(parts):
+                    dataset = parts[i]
+                    qualifier = parts[i + 1]
+                    value = parts[i + 2]
+                    if dataset and qualifier and value:
+                        criteria.append({
+                            "dataset": dataset,
+                            "qualifier": qualifier,
+                            "value": value,
+                        })
+                    else:
+                        valid = False
+                        break
+            
+            if valid and criteria:
+                qualifier_keys = [f"{c['qualifier']}={c['value']}" for c in criteria]
+                parsed.update(
+                    {
+                        "kind": "multi_criteria",
+                        "target_var": target_var,
+                        "criteria": criteria,
+                        "qualifier_key": " AND ".join(qualifier_keys),
+                    }
+                )
+                return parsed
 
     parsed["kind"] = "low_confidence"
     return parsed
@@ -368,6 +428,14 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
                 if parsed["qualifier_key"]:
                     candidates.append((parsed["qualifier_key"], "path_B_qualifier_value"))
                     xml_candidate_names.add(parsed["qualifier_key"])
+            elif parsed["kind"] == "multi_criteria":
+                if parsed["target_var"]:
+                    candidates.append((parsed["target_var"], "path_A_target_var"))
+                    xml_candidate_names.add(parsed["target_var"])
+                for i, criterion in enumerate(parsed.get("criteria", [])):
+                    key = f"{criterion['qualifier']}={criterion['value']}"
+                    candidates.append((key, f"path_B_criteria_{i}"))
+                    xml_candidate_names.add(key)
             else:
                 if row["variable_norm"]:
                     candidates.append((row["variable_norm"], "simple"))
@@ -400,7 +468,7 @@ def compare_xml_vs_pymupdf(xml_result: Dict[str, Any], pymupdf_result: Dict[str,
                     if page_subset == "exact":
                         diff_type = (
                             DIFF_COMPOUND_RESOLVED
-                            if parsed["kind"] == "compound"
+                            if parsed["kind"] in ("compound", "multi_criteria")
                             else DIFF_MATCH
                         )
                     else:

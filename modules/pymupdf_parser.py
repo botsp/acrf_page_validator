@@ -1,4 +1,4 @@
-import fitz  # PyMuPDF
+﻿import fitz  # PyMuPDF
 import re
 import time
 from typing import Dict, List, Any, Set, Tuple
@@ -56,65 +56,54 @@ def is_flattened_pdf(doc: fitz.Document, threshold: float = 180) -> Tuple[bool, 
     return is_flattened, avg_text, reason
 
 
-def extract_annotation_regions(page: fitz.Page) -> List[str]:
+def extract_annotation_regions(page: fitz.Page) -> Dict[str, Any]:
     """
-    Extract text from annotation regions using actual PDF annotation objects (annots).
-    Clip using a slightly inset bbox to avoid capturing adjacent glyphs (e.g., radio
-    buttons), and perform light cleaning to remove very short parenthetical markers
-    like `( )`, `( y )` that commonly appear near widgets.
-
-    Args:
-        page: PyMuPDF page object
-
+    Extract text from annotation /Contents fields (MSG 2.0 compliant).
+    
+    Strategy: Extract from annotation /Contents field ONLY.
+    - If annotation has /Contents: use it (clean, structurally sound)
+    - If annotation has no /Contents: mark for OCR processing (skip coordinate clipping)
+    
     Returns:
-        List of extracted annotation texts (may be empty if no annotations found)
+        Dict with:
+        - "texts": List of successfully extracted annotation texts
+        - "need_ocr": List of annotations that lack /Contents and need OCR
     """
     annotation_texts = []
+    need_ocr_annotations = []
 
-    # Preferred method: iterate actual annotation objects (works for non-flattened PDFs)
     try:
         ann = page.first_annot
         while ann is not None:
             try:
-                rect = ann.rect
-                # Inset the rect slightly to avoid capturing adjacent UI elements (radio circles, borders)
-                pad = 1.5  # points
-                try:
-                    inset_rect = fitz.Rect(rect.x0 + pad, rect.y0 + pad, rect.x1 - pad, rect.y1 - pad)
-                    # If inset becomes invalid, fall back to original rect
-                    if inset_rect.x1 <= inset_rect.x0 or inset_rect.y1 <= inset_rect.y0:
-                        inset_rect = rect
-                except Exception:
-                    inset_rect = rect
-
-                text_in_rect = page.get_text("text", clip=inset_rect).strip()
-                if not text_in_rect:
-                    # Try fallback to original rect if inset removed text unexpectedly
-                    text_in_rect = page.get_text("text", clip=rect).strip()
-
-                if text_in_rect:
-                    # initial value
-                    cleaned = text_in_rect
-                    # Remove very short parenthetical markers like '( )' or '( y )'
+                # Preferred: Read /Contents field (MSG 2.0 compliant, structurally sound)
+                content = ann.info.get("content", "").strip()
+                
+                if content:
+                    # Clean up very short parenthetical markers
+                    cleaned = content
                     cleaned = re.sub(r'\(\s*[A-Za-z\s]{0,3}\s*\)', '', cleaned)
-                    # Remove leading parenthetical fragments, closed or not, e.g. '(x )', '(x', '(x FAORRES'
-                    cleaned = re.sub(r'^\(\s*[^)]{0,15}\)\s*', '', cleaned)  # closed parentheses at start
-                    cleaned = re.sub(r'^\(\s*[^)]{1,15}\s+', '', cleaned)    # opening parenthesis with no close, up to 15 chars
-                    # Remove any residual leading '('
+                    cleaned = re.sub(r'^\(\s*[^)]{0,15}\)\s*', '', cleaned)
+                    cleaned = re.sub(r'^\(\s*[^)]{1,15}\s+', '', cleaned)
                     cleaned = re.sub(r'^\(\s*', '', cleaned)
-                    # Collapse multiple spaces and normalize
                     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+                    
                     if cleaned:
                         annotation_texts.append(cleaned)
+                else:
+                    # No /Contents: mark for OCR (do NOT use coordinate clipping)
+                    need_ocr_annotations.append({
+                        "rect": ann.rect,
+                        "type": ann.type[1],
+                        "reason": "no_contents_field"
+                    })
             except Exception:
-                # ignore individual annotation failures
                 pass
             ann = ann.next
     except Exception:
-        # If annotation iteration fails, fall back to empty list (do NOT use whole-page heuristics)
         pass
 
-    # Deduplicate exact duplicate texts while preserving order
+    # Deduplicate texts while preserving order
     seen = set()
     unique_texts = []
     for text in annotation_texts:
@@ -122,8 +111,10 @@ def extract_annotation_regions(page: fitz.Page) -> List[str]:
             seen.add(text)
             unique_texts.append(text)
 
-    return unique_texts
-
+    return {
+        "texts": unique_texts,
+        "need_ocr": need_ocr_annotations
+    }
 
 def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
     """
@@ -171,6 +162,21 @@ def extract_variable_value_pairs(text: str) -> List[Tuple[str, str, str]]:
     pairs = []
     pattern = r'([A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*)\s*=\s*([A-Z0-9][A-Z0-9\s/\-]{0,80}?)(?=\s+(?:when|if|then)\b|\s*\||\s*;|$)'
     for match in re.finditer(pattern, text):
+        lhs = match.group(1).strip()
+        value = re.sub(r'\s{2,}', ' ', match.group(2).strip())
+        if not lhs or not value:
+            continue
+        left_vars = [x.strip().upper() for x in lhs.split("/") if x.strip()]
+        for var in left_vars:
+            if 2 <= len(var) <= 8:
+                if var == "VSSTAT" and value == "NOT DONE":
+                    continue
+                pairs.append((var, value, f"{var}={value}"))
+
+    # SUPP annotations often use the shape "QNAM=AEHOSPDT in SUPPAE".
+    # Capture the variable/value pair before the trailing dataset phrase.
+    supp_pattern = r'([A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*)\s*=\s*([A-Z0-9][A-Z0-9\s/\-]{0,80}?)\s+in\s+(SUPP[A-Z]{2,8})\b'
+    for match in re.finditer(supp_pattern, text):
         lhs = match.group(1).strip()
         value = re.sub(r'\s{2,}', ' ', match.group(2).strip())
         if not lhs or not value:
@@ -400,11 +406,10 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             page_idx = page_num + 1
             
             # ==================== Extract annotation regions ====================
-            annotation_texts = extract_annotation_regions(page)
+            annot_result = extract_annotation_regions(page)
+            annotation_texts = annot_result.get("texts", [])
+            need_ocr = annot_result.get("need_ocr", [])
             
-            # If no annotations found, skip this page (do NOT fallback to full text)
-            if not annotation_texts:
-                continue
             
             # ==================== Extract NOT SUBMITTED entries ====================
             full_page_text = page.get_text("text")
@@ -622,4 +627,6 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print("✅ PyMuPDF Parser Module Loaded Successfully (v2.0 - Annotation-focused)")
+    print("âœ… PyMuPDF Parser Module Loaded Successfully (v2.0 - Annotation-focused)")
+
+
