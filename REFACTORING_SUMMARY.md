@@ -147,3 +147,12 @@ need_ocr = annot_result.get("need_ocr", [])
 - Maintained for `/Contents` field extraction
 - Handles common artifacts: `( )`, `( y )`, leading parentheses
 - Applied consistently to structured content
+
+## 19 June 2026 - OpenCV+OCR Tuning Note
+
+- Tightened OCR pipeline to follow: `visual hard gate -> OCR -> semantic gate`.
+- Added color-filled rectangle prioritization, border evidence scoring (pixel-based), ROI inset before OCR, and annotation-like text gating to reduce body-text contamination in `RawTexts`.
+- Replaced longest-text OCR selection with score-based ranking (`annotation pattern score + OCR confidence`).
+- Added debug counters: `roi_prefilter_skipped_count` and `ocr_noise_rejected_count`.
+- Set `max_boxes_per_page` to **28** as a temporary cap to reduce truncation risk on dense pages while keeping runtime acceptable.
+- Next step: calibrate a more reliable cap with additional project PDFs using `boxes_per_page` saturation and end-to-end processing time.
