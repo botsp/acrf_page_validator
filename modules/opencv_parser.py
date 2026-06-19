@@ -67,140 +67,255 @@ def is_tesseract_available() -> Tuple[bool, str]:
         return False, str(exc)
 
 
+def _compute_rect_iou(rect_a: Tuple[int, int, int, int], rect_b: Tuple[int, int, int, int]) -> float:
+    """Compute IoU between two (x, y, w, h) rectangles."""
+    ax, ay, aw, ah = rect_a
+    bx, by, bw, bh = rect_b
+
+    left = max(ax, bx)
+    right = min(ax + aw, bx + bw)
+    top = max(ay, by)
+    bottom = min(ay + ah, by + bh)
+
+    if right <= left or bottom <= top:
+        return 0.0
+
+    intersection = (right - left) * (bottom - top)
+    union = aw * ah + bw * bh - intersection
+    return (intersection / union) if union > 0 else 0.0
+
+
+def _normalize_ocr_text(text: str) -> str:
+    """Normalize OCR text by collapsing whitespace."""
+    return re.sub(r"\s{2,}", " ", (text or "").replace("\n", " ").replace("\r", " ")).strip()
+
+
+def _score_annotation_text(text: str) -> float:
+    """
+    Score whether OCR text looks like annotation content rather than page body text.
+
+    Higher score => more annotation-like.
+    """
+    normalized = _normalize_ocr_text(text)
+    if not normalized:
+        return -10.0
+
+    upper_tokens = re.findall(r"\b[A-Z][A-Z0-9]{1,7}\b", normalized)
+    domain_label_hits = len(re.findall(r"\b[A-Z][A-Z0-9]{1,7}\s*(?:\(|=)", normalized))
+    variable_equal_hits = len(re.findall(r"\b[A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*\s*=", normalized))
+    supp_hits = 1 if re.search(r"\bSUPP[A-Z]{2,8}\b", normalized) else 0
+    not_submitted_hits = len(re.findall(r"\b(?:NOT\s+SUBMITTED|NOTSUBMITTED)\b", normalized, re.IGNORECASE))
+    slash_pair_hits = len(re.findall(r"\b[A-Z][A-Z0-9]{1,7}/[A-Z][A-Z0-9]{1,7}\b", normalized))
+
+    letters = [ch for ch in normalized if ch.isalpha()]
+    lowercase_ratio = (sum(1 for ch in letters if ch.islower()) / len(letters)) if letters else 0.0
+    word_count = len(normalized.split())
+
+    length_penalty = 0.0
+    if len(normalized) > 220:
+        length_penalty += min(6.0, (len(normalized) - 220) / 35.0)
+    if word_count > 22:
+        length_penalty += min(5.0, (word_count - 22) / 5.0)
+
+    score = (
+        len(upper_tokens) * 2.0
+        + domain_label_hits * 4.0
+        + variable_equal_hits * 4.5
+        + supp_hits * 3.0
+        + not_submitted_hits * 5.0
+        + slash_pair_hits * 2.0
+        - lowercase_ratio * 2.5
+        - length_penalty
+    )
+    return round(score, 2)
+
+
+def _passes_annotation_text_gate(text: str, score: float, min_score: float = 1.5) -> bool:
+    """Hard gate to keep only annotation-like OCR strings."""
+    normalized = _normalize_ocr_text(text)
+    if not normalized or score < min_score:
+        return False
+
+    if re.search(r"\b(?:NOT\s+SUBMITTED|NOTSUBMITTED)\b", normalized, re.IGNORECASE):
+        return True
+    if re.search(r"\bSUPP[A-Z]{2,8}\b", normalized):
+        return True
+    if re.search(r"\b[A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*\s*=", normalized):
+        return True
+    if re.search(r"\b[A-Z][A-Z0-9]{1,7}\s*\(", normalized):
+        return True
+
+    upper_tokens = re.findall(r"\b[A-Z][A-Z0-9]{1,7}\b", normalized)
+    letters = [ch for ch in normalized if ch.isalpha()]
+    lowercase_ratio = (sum(1 for ch in letters if ch.islower()) / len(letters)) if letters else 0.0
+
+    if len(upper_tokens) >= 2 and lowercase_ratio <= 0.45:
+        return True
+    if len(upper_tokens) == 1 and lowercase_ratio <= 0.2 and len(normalized) <= 14:
+        return True
+    return False
+
+
+def _extract_ocr_text_with_confidence(image: np.ndarray, language: str, config: str) -> Tuple[str, float]:
+    """Run OCR once and return normalized text plus mean confidence."""
+    data = pytesseract.image_to_data(
+        image, lang=language, config=config, output_type=pytesseract.Output.DICT
+    )
+
+    texts = data.get("text", [])
+    confs = data.get("conf", [])
+
+    words = []
+    valid_conf_values = []
+    for raw_text, raw_conf in zip(texts, confs):
+        token = (raw_text or "").strip()
+        if token:
+            words.append(token)
+        try:
+            confidence = float(raw_conf)
+        except (TypeError, ValueError):
+            continue
+        if confidence >= 0 and token:
+            valid_conf_values.append(confidence)
+
+    merged_text = _normalize_ocr_text(" ".join(words))
+    mean_conf = (
+        round(sum(valid_conf_values) / len(valid_conf_values), 2)
+        if valid_conf_values else 0.0
+    )
+    return merged_text, mean_conf
+
+
+def _quick_ocr_text(image: np.ndarray, language: str, config: str) -> str:
+    """Run lightweight OCR and return normalized text without confidence parsing."""
+    raw_text = pytesseract.image_to_string(image, lang=language, config=config)
+    return _normalize_ocr_text(raw_text)
+
+
 def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) -> List[Dict[str, Any]]:
     """
-    Detect annotated regions (colored boxes with text) using contour analysis.
+    Detect annotated regions by prioritizing colored rectangle backgrounds.
 
     Strategy:
-    1. Use multiple detection methods for robustness:
-       - Color-based: detect non-white/non-gray backgrounds
-       - Edge-based: detect borders via Canny + dilation
-    2. Apply morphological operations to close gaps in box borders
-    3. Find contours and filter by area/aspect ratio
-    4. Return bounding rectangles with confidence estimate
+    1. Build a colored-background mask (hard gate).
+    2. Keep contours that are rectangle-like and reasonably sized.
+    3. Use border edge evidence as a confidence boost.
+    4. Deduplicate overlapping boxes by IoU.
 
     Args:
         page_image: Image array from PyMuPDF page.get_pixmap()
         min_box_area: Minimum pixel area to consider as annotation (default 50)
 
     Returns:
-        List of detected boxes: [{"rect": (x, y, w, h), "confidence": float, "type": str}, ...]
-        Types: "solid_border", "dashed_border", "colored_bg", "text_region"
+        List of detected boxes with OCR candidate metadata.
     """
     detected_boxes = []
 
     try:
+        if page_image is None or page_image.size == 0:
+            return detected_boxes
+
         gray = cv2.cvtColor(page_image, cv2.COLOR_BGR2GRAY)
-
-        # ==================== Method 1: Edge detection ====================
-        # Detect box borders using Canny edge detection
-        edges = cv2.Canny(gray, 30, 150)
-
-        # Dilate edges to connect broken lines
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-        edges_dilated = cv2.dilate(edges, kernel, iterations=3)
-
-        # Close small gaps
-        edges_closed = cv2.morphologyEx(edges_dilated, cv2.MORPH_CLOSE, kernel, iterations=2)
-
-        # ==================== Method 2: Color detection ====================
         hsv = cv2.cvtColor(page_image, cv2.COLOR_BGR2HSV)
+        edges = cv2.Canny(gray, 40, 140)
 
-        # Detect non-white regions (potential colored backgrounds)
-        # White in HSV: S < 25, V > 240
-        lower_white = np.array([0, 0, 240])
-        upper_white = np.array([180, 25, 255])
-        white_mask = cv2.inRange(hsv, lower_white, upper_white)
+        # Hard gate: keep regions with visible color fill.
+        lower_colored = np.array([0, 18, 105], dtype=np.uint8)
+        upper_colored = np.array([180, 255, 255], dtype=np.uint8)
+        color_mask = cv2.inRange(hsv, lower_colored, upper_colored)
 
-        # Find non-white regions
-        non_white_mask = cv2.bitwise_not(white_mask)
+        # Remove thin text strokes and close fragmented fill areas.
+        open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
 
-        # Detect gray regions (potential text areas with light background)
-        # Gray: Low saturation, medium value
-        lower_gray = np.array([0, 0, 50])
-        upper_gray = np.array([180, 50, 240])
-        gray_mask = cv2.inRange(hsv, lower_gray, upper_gray)
+        contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        page_area = page_image.shape[0] * page_image.shape[1]
+        candidate_boxes: List[Dict[str, Any]] = []
 
-        # Combine all detection methods
-        combined_mask = cv2.bitwise_or(edges_closed, non_white_mask)
-        combined_mask = cv2.bitwise_or(combined_mask, gray_mask)
-
-        # Additional morphological cleanup
-        kernel2 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel2, iterations=1)
-
-        # Find contours
-        contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Track detected rectangles to avoid duplicates
-        rects = []
-
-        # Analyze each contour
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < min_box_area:
+            if area < max(min_box_area, 120):
                 continue
 
-            # Get bounding rectangle
             x, y, w, h = cv2.boundingRect(contour)
+            rect_area = w * h
 
-            # Filter by size (annotations are reasonably sized boxes, not tiny marks)
-            if w < 20 or h < 10:
+            if w < 24 or h < 10:
+                continue
+            if rect_area <= 0:
+                continue
+            if rect_area > page_area * 0.18:
                 continue
 
-            # Filter by aspect ratio (avoid thin lines)
             aspect_ratio = max(w, h) / min(w, h)
-            if aspect_ratio > 100:  # Very elongated (likely a line)
+            if aspect_ratio > 35:
                 continue
 
-            # Estimate confidence based on contour area vs bounding box area
-            box_area = w * h
-            confidence = area / box_area if box_area > 0 else 0
-
-            # Filter out very low confidence detections
-            if confidence < 0.1:
+            fill_ratio = area / rect_area
+            if fill_ratio < 0.35:
                 continue
 
-            # Classify detection type
-            contour_points = len(contour)
-            box_perimeter = 2 * (w + h)
-            fill_ratio = contour_points / box_perimeter if box_perimeter > 0 else 0
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter <= 0:
+                continue
+            approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
+            if len(approx) > 10:
+                continue
 
-            if fill_ratio > 0.7:
+            roi_mask = color_mask[y:y + h, x:x + w]
+            colored_ratio = cv2.countNonZero(roi_mask) / rect_area
+            if colored_ratio < 0.40:
+                continue
+
+            # Border evidence from edge density in a thin border band.
+            band = np.zeros((h, w), dtype=np.uint8)
+            border_thickness = max(1, min(3, min(w, h) // 10))
+            cv2.rectangle(band, (0, 0), (w - 1, h - 1), 255, border_thickness)
+            roi_edges = edges[y:y + h, x:x + w]
+            band_pixels = cv2.countNonZero(band)
+            edge_band_pixels = cv2.countNonZero(cv2.bitwise_and(roi_edges, band))
+            border_density = (edge_band_pixels / band_pixels) if band_pixels > 0 else 0.0
+
+            confidence = (
+                0.50 * colored_ratio
+                + 0.35 * fill_ratio
+                + 0.15 * min(border_density * 8.0, 1.0)
+            )
+            if confidence < 0.42:
+                continue
+
+            if border_density >= 0.12:
                 detection_type = "solid_border"
-            elif fill_ratio > 0.4:
+            elif border_density >= 0.05:
                 detection_type = "dashed_border"
             else:
                 detection_type = "colored_bg"
 
-            if confidence < 0.3:
-                detection_type = "text_region"
-
-            # Check for overlapping detections (keep the one with higher confidence)
-            is_duplicate = False
-            for i, existing_rect in enumerate(rects):
-                ex, ey, ew, eh, econf, etype = existing_rect
-                # Check if rectangles significantly overlap
-                overlap_x = max(0, min(x + w, ex + ew) - max(x, ex))
-                overlap_y = max(0, min(y + h, ey + eh) - max(y, ey))
-                overlap_area = overlap_x * overlap_y
-                if overlap_area > 0.5 * min(box_area, ew * eh):
-                    if confidence > econf:
-                        rects.pop(i)
-                    else:
-                        is_duplicate = True
-                    break
-
-            if not is_duplicate:
-                rects.append((x, y, w, h, confidence, detection_type))
-
-        # Convert to output format
-        for x, y, w, h, confidence, detection_type in rects:
-            detected_boxes.append({
+            candidate_boxes.append({
                 "rect": (x, y, w, h),
-                "confidence": min(confidence, 1.0),
-                "type": detection_type
+                "confidence": min(1.0, float(round(confidence, 3))),
+                "type": detection_type,
+                "fill_ratio": round(fill_ratio, 3),
+                "colored_ratio": round(colored_ratio, 3),
+                "border_density": round(border_density, 3),
             })
+
+        # Deduplicate by IoU (keep higher-confidence boxes).
+        candidate_boxes.sort(key=lambda item: item["confidence"], reverse=True)
+        for candidate in candidate_boxes:
+            if any(
+                _compute_rect_iou(candidate["rect"], kept["rect"]) > 0.45
+                for kept in detected_boxes
+            ):
+                continue
+            detected_boxes.append(candidate)
+
+        # Guardrail for OCR cost on noisy pages.
+        max_boxes_per_page = 28
+        if len(detected_boxes) > max_boxes_per_page:
+            detected_boxes = detected_boxes[:max_boxes_per_page]
 
     except Exception as e:
         # Log but don't fail - return empty list if detection fails
@@ -215,16 +330,18 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
     Extract text from a region using Tesseract OCR.
 
     Preprocessing steps:
-    1. Extract region with margin
-    2. Convert to grayscale
-    3. Apply multiple binarization approaches
-    4. Try OCR with different configurations
-    5. Return best result
+    1. Shrink region to avoid neighboring body text
+    2. Extract region with a small margin
+    3. Convert to grayscale
+    4. Apply multiple binarization approaches
+    5. Run lightweight OCR to find likely annotation text
+    6. Run confidence OCR only for top candidates
+    7. Return best result
 
     Args:
         page_image: Full page image
         rect: (x, y, w, h) bounding rectangle
-        margin: Expand rect by this many pixels to capture full annotation
+        margin: Small post-shrink margin to retain annotation border glyphs
         language: Tesseract language code (default "eng")
         debug: If True, save debug images
 
@@ -234,7 +351,16 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
     try:
         x, y, w, h = rect
 
-        # Add margin with bounds checking
+        # Shrink ROI first to avoid pulling neighboring non-annotation text.
+        inset_x = max(1, int(w * 0.06))
+        inset_y = max(1, int(h * 0.08))
+        if (w - 2 * inset_x) >= 12 and (h - 2 * inset_y) >= 8:
+            x += inset_x
+            y += inset_y
+            w -= 2 * inset_x
+            h -= 2 * inset_y
+
+        # Add small margin with bounds checking (default callers may pass 0 or 1).
         x1 = max(0, x - margin)
         y1 = max(0, y - margin)
         x2 = min(page_image.shape[1], x + w + margin)
@@ -252,47 +378,101 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
         else:
             gray = region
 
-        # Try multiple binarization methods and keep best result
+        variants: List[np.ndarray] = [gray]
+
+        _, binary_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        variants.append(cv2.dilate(binary_otsu, kernel, iterations=1))
+
+        # Adaptive threshold is helpful but relatively expensive; use as fallback only.
+        tiny_roi = w < 70 or h < 24
+        primary_config = r"--psm 7 --oem 3" if tiny_roi else r"--psm 6 --oem 3"
+
+        quick_candidates = []
+        for processed in variants:
+            try:
+                quick_text = _quick_ocr_text(processed, language, primary_config)
+            except Exception:
+                continue
+            if not quick_text:
+                continue
+            quick_score = _score_annotation_text(quick_text)
+            quick_candidates.append({
+                "text": quick_text,
+                "score": quick_score,
+                "image": processed,
+                "config": primary_config,
+            })
+
+        if not quick_candidates:
+            try:
+                binary_adaptive = cv2.adaptiveThreshold(
+                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+                )
+                processed = cv2.dilate(binary_adaptive, kernel, iterations=1)
+                quick_text = _quick_ocr_text(processed, language, primary_config)
+                if quick_text:
+                    quick_candidates.append({
+                        "text": quick_text,
+                        "score": _score_annotation_text(quick_text),
+                        "image": processed,
+                        "config": primary_config,
+                    })
+            except Exception:
+                pass
+
+        if not quick_candidates:
+            return ""
+
+        quick_candidates.sort(
+            key=lambda item: (item["score"], -len(item["text"])),
+            reverse=True
+        )
+        best_quick = quick_candidates[0]
+        best_quick_text = best_quick["text"].strip().strip("[]|;:,")
+        second_gap = (
+            best_quick["score"] - quick_candidates[1]["score"]
+            if len(quick_candidates) > 1 else 99.0
+        )
+
+        # For likely-noise text, skip expensive confidence OCR and return quick result.
+        if best_quick["score"] < 1.5:
+            return best_quick["text"]
+
+        # Fast path for unambiguous short tokens (common annotation case).
+        if (
+            best_quick["score"] >= 2.0
+            and second_gap >= 0.8
+            and re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", best_quick_text)
+        ):
+            return best_quick_text
+
+        confidence_candidates = [best_quick]
+        if len(quick_candidates) > 1:
+            second = quick_candidates[1]
+            if best_quick["score"] - second["score"] <= 1.0:
+                confidence_candidates.append(second)
+
         results = []
+        for candidate in confidence_candidates:
+            try:
+                conf_text, confidence = _extract_ocr_text_with_confidence(
+                    candidate["image"], language, candidate["config"]
+                )
+            except Exception:
+                conf_text, confidence = "", 0.0
 
-        # Method 1: Otsu's binarization
-        try:
-            _, binary_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            processed1 = cv2.dilate(binary_otsu, kernel, iterations=1)
-            text1 = pytesseract.image_to_string(processed1, lang=language, config=r'--psm 6 --oem 3')
-            if text1.strip():
-                results.append(text1.strip())
-        except:
-            pass
+            final_text = conf_text if conf_text else candidate["text"]
+            annotation_score = _score_annotation_text(final_text)
+            total_score = annotation_score * 10.0 + confidence
+            results.append((total_score, annotation_score, confidence, final_text))
 
-        # Method 2: Adaptive thresholding (for varying illumination)
-        try:
-            binary_adaptive = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                     cv2.THRESH_BINARY, 11, 2)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            processed2 = cv2.dilate(binary_adaptive, kernel, iterations=1)
-            text2 = pytesseract.image_to_string(processed2, lang=language, config=r'--psm 6 --oem 3')
-            if text2.strip():
-                results.append(text2.strip())
-        except:
-            pass
-
-        # Method 3: Inverted binary (for light text on dark background)
-        try:
-            _, binary_normal = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            binary_inverted = cv2.bitwise_not(binary_normal)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            processed3 = cv2.dilate(binary_inverted, kernel, iterations=1)
-            text3 = pytesseract.image_to_string(processed3, lang=language, config=r'--psm 6 --oem 3')
-            if text3.strip():
-                results.append(text3.strip())
-        except:
-            pass
-
-        # Return longest result (usually most complete)
         if results:
-            return max(results, key=len)
+            results.sort(key=lambda item: (item[0], item[1], item[2], -len(item[3])), reverse=True)
+            best_total, _, _, best_text = results[0]
+            if best_total < 0 and len(best_text.split()) > 10:
+                return ""
+            return best_text
 
         return ""
 
@@ -569,8 +749,10 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                     "pages_processed": 0,
                     "total_boxes_detected": 0,
                     "boxes_per_page": [],
+                    "roi_prefilter_skipped_count": 0,
                     "ocr_success_count": 0,
                     "ocr_fail_count": 0,
+                    "ocr_noise_rejected_count": 0,
                     "variables_extracted": 0
                 },
                 "error_message": f"Tesseract OCR engine not available: {tesseract_error}"
@@ -600,8 +782,10 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             "pages_processed": 0,
             "total_boxes_detected": 0,
             "boxes_per_page": [],
+            "roi_prefilter_skipped_count": 0,
             "ocr_success_count": 0,
             "ocr_fail_count": 0,
+            "ocr_noise_rejected_count": 0,
             "variables_extracted": 0
         }
 
@@ -634,13 +818,25 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             # ==================== Extract text from each box ====================
             for box_info in detected_boxes:
                 rect = box_info["rect"]
-                confidence = box_info["confidence"]
+                x, y, w, h = rect
+                aspect_ratio = max(w, h) / max(1, min(w, h))
+                border_density = float(box_info.get("border_density", 0.0))
+
+                # Fast prefilter: skip very wide, short strips that mostly come from row headers/body bands.
+                if h <= 19 and w >= 140 and aspect_ratio >= 7.5 and border_density < 0.35:
+                    debug_info["roi_prefilter_skipped_count"] += 1
+                    continue
 
                 # Extract text via OCR
-                ocr_text = extract_text_ocr(page_image, rect, margin=5)
+                ocr_text = extract_text_ocr(page_image, rect, margin=1)
 
                 if not ocr_text or len(ocr_text.strip()) < 2:
                     debug_info["ocr_fail_count"] += 1
+                    continue
+
+                ocr_text_score = _score_annotation_text(ocr_text)
+                if not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.5):
+                    debug_info["ocr_noise_rejected_count"] += 1
                     continue
 
                 debug_info["ocr_success_count"] += 1

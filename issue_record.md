@@ -368,6 +368,44 @@ Variable	NOT SUBMITTED	10,11,13,16,17,24,26,30,31,32,33,34,40,41,42,43,46,48,49,
    - PyMuPDF Only / OpenCV Only: 只在单侧出现。
 4. acrf_3039_UC_flattened.pdf 当前被识别为 Annotation-flattened PDF；对比结果示例为 Consensus=0, Page Mismatch=1 (NOT SUBMITTED), OpenCV Only=466。
 
-明天重点：
+明天重点[Pendging]：
 1. 清晰化 OCR 提取文本：检查 RawTexts 噪声、误识别、box 合并/截断、重复文本保留策略，并决定怎样展示 OCR confidence/debug 信息。
 2. non-flattened annotation PDF 的双 parser 一致性策略：定义哪些差异可以自动接受，哪些进入 Page Mismatch/Needs Review，并设计这些差异如何进入 XML comparison（例如只用 Consensus，还是带风险等级纳入）。
+
+
+
+19Jun2026:
+1.Raw text的提取不对，抓取了太多不相关的文本；你先介绍下这个模块的处理思路；我的理解下是先识别到有背景色、实现或者虚线的边框，这些是annotation 文本的前提，然后在识别提取
+
+2.我们先退一步讨论一个问题，我在config/SDTM-MSG_v2.0_KS_highlight.pdf 放了这份文件，它规定了如何做annotation，你看下我把"annotation都是带有背景色的边框，但可能是实线边框，也可能是虚线边框"
+做annotation的前提条件，是否有遗漏
+
+3.我明白你的意思了，你是说我视觉上看起来有边框，但实际上，PDF结构层它没用边框？是这个意思吗，你说的这个我没法验证，因为我看不到PDF元数据；其次，我现在是OPENCV+OCR模块，对于flattened PDF，它不应该能更好的从视觉上识别出带背景色的边框吗
+
+
+把当前流程从“广泛找区域→OCR”改成“严格框筛选→OCR→语义过滤”。
+
+Visual hard gate（先筛框）
+只保留满足这三点的 ROI：有背景色(fill)、近似矩形(rectangularity)、尺寸在合理范围（过滤整段正文大块和极小噪点）。
+
+Border evidence（边框作为加分，不是唯一条件）
+用像素边缘判断有无 solid/dashed-like border；但不依赖 PDF metadata 里的 border.style，避免误杀有效框。
+
+ROI refine（框内裁剪）
+对通过筛选的框做内缩裁剪（inset），避免把框外正文、横线、标签带进 OCR。
+
+OCR 结果选择改规则
+不再用“最长文本优先”；改为 OCR confidence + annotation pattern score 选最优结果（避免长句噪声胜出）。
+
+Text semantic gate（你的规则二次过滤）
+仅保留符合 annotation 语法的文本：如 capitalized token<=8、SUPP pattern、VAR=VALUE、NOT SUBMITTED；
+对“正文型长句”（大量小写自然语言）直接剔除，不进入 RawTexts。
+
+输出策略
+RawTexts 只记录通过上述 gate 的框内全文（不截断），并保留 rejection reason 统计，便于后续调阈值。
+
+4. 性能与上限临时决策（19Jun2026）
+- OpenCV 每页候选框上限先从 20 调整到 28（临时值）。
+- 目的：降低高密度页面被硬截断导致的漏检风险（某页真实 annotation > 20 时）。
+- 已知 trade-off：上限提升会增加 OCR 耗时，但相较于不设上限仍可控。
+- 后续计划：收集更多项目 PDF，基于 boxes_per_page 命中上限比例与总耗时，回归出更可靠的上限。
