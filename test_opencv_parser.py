@@ -14,7 +14,8 @@ from modules.opencv_parser import (
     classify_term,
     parse_supp_variable,
     extract_variable_value_pairs,
-    extract_not_submitted_entries
+    extract_not_submitted_entries,
+    _repair_annotation_text,
 )
 from config.config_loader import CONFIG
 
@@ -37,6 +38,36 @@ def test_extract_candidates():
         else:
             print(f"  ❌ FAIL: '{text}' → {result} (expected at least {expected})")
     
+    print(f"  Result: {passed}/{len(test_cases)} passed")
+    return passed == len(test_cases)
+
+
+def test_repair_annotation_text():
+    """Test targeted OCR repair rules for leading-character loss patterns."""
+    print("\n[TEST 1B] _repair_annotation_text()")
+    standard_terms = CONFIG.get("standard_terms", {"variable": set()})
+    standard_vars = standard_terms.get("variable", set())
+    test_cases = [
+        ("ACAT=DISEASE CHARACTERISTICS CROHNS DISEASE", "FACAT=DISEASE CHARACTERISTICS CROHNS DISEASE"),
+        ("AOBJ=FEVER OVER 37.8 DEGREES CELSIUS", "FAOBJ=FEVER OVER 37.8 DEGREES CELSIUS"),
+        ("AORRES when FATESTCD=OCCUR", "FAORRES when FATESTCD=OCCUR"),
+        ("SORRES/VSORRESU when VSTESTCD=SYSBP", "VSORRES/VSORRESU when VSTESTCD=SYSBP"),
+        ("SSTAT=NOT DONE when RSTESTCD=RSALL", "RSSTAT=NOT DONE when RSTESTCD=RSALL"),
+        ("STERM when DSDECOD=VOLUNTARY WITHDRAWAL", "DSTERM when DSDECOD=VOLUNTARY WITHDRAWAL"),
+        ("OSCAT=IBDQ", "QSCAT=IBDQ"),
+        ("UOCCUR=Y when Former or Current is selected", "SUOCCUR=Y when Former or Current is selected"),
+        ("USTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT", "SUSTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT"),
+    ]
+
+    passed = 0
+    for text, expected in test_cases:
+        result = _repair_annotation_text(text, standard_vars)
+        if result == expected:
+            print(f"  ✅ PASS: '{text}' → '{result}'")
+            passed += 1
+        else:
+            print(f"  ❌ FAIL: '{text}' → '{result}' (expected '{expected}')")
+
     print(f"  Result: {passed}/{len(test_cases)} passed")
     return passed == len(test_cases)
 
@@ -76,7 +107,7 @@ def test_parse_supp_variable():
     test_cases = [
         ("AEPTRTPT in SUPPAE", [("AEPTRTPT", "SUPPAE")]),
         ("SUPPAE.AEPTRTPT", [("AEPTRTPT", "SUPPAE")]),
-        ("QNAM in SUPPxx", [("QNAM", "SUPPxx")]),
+        ("QNAM in SUPPxx", [("QNAM", "SUPPXX")]),
     ]
     
     passed = 0
@@ -160,6 +191,7 @@ def main():
     
     tests = [
         test_extract_candidates,
+        test_repair_annotation_text,
         test_classify_term,
         test_parse_supp_variable,
         test_extract_variable_value_pairs,

@@ -59,7 +59,7 @@ with st.sidebar:
     st.title("aCRF Page Validator")
     st.markdown("**SDTM Define.xml vs aCRF PDF Page Number Validation Tool**")
     st.divider()
-    st.caption("Lightweight Version v0.1.0")
+    st.caption("VERSION 2.0")
 
 # ====================== Main Header ======================
 st.markdown('<h1 class="main-header">aCRF Page Validator</h1>', unsafe_allow_html=True)

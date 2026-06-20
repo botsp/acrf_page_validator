@@ -156,3 +156,37 @@ need_ocr = annot_result.get("need_ocr", [])
 - Added debug counters: `roi_prefilter_skipped_count` and `ocr_noise_rejected_count`.
 - Set `max_boxes_per_page` to **28** as a temporary cap to reduce truncation risk on dense pages while keeping runtime acceptable.
 - Next step: calibrate a more reliable cap with additional project PDFs using `boxes_per_page` saturation and end-to-end processing time.
+
+## 20 June 2026 - VERSION 2.0 Release
+
+### Scope
+
+- Flattened annotation PDF extraction quality improvements on the OpenCV + Tesseract pipeline.
+- No XML parsing logic changes.
+- No non-flattened PyMuPDF extraction flow changes.
+- No cross-validation report contract changes.
+
+### Refactoring Summary
+
+1. Added suspicious-only second-pass OCR (not full two-pass on all boxes).
+2. Added OCR text repair layer for:
+   - split-left token artifacts (`FASC ALT=` -> `FASCAT=`)
+   - SUPP key drift (`QONAM=` / `ON AM=` -> `QNAM=`)
+3. Hardened OpenCV suffix/prefix fallback handling to ignore empty patterns.
+4. Enhanced `parse_supp_variable` to support `QNAM=... in SUPPxx` and mixed-case inputs.
+5. Added contextual first-character recovery for key patterns:
+   - `ACAT` -> `FACAT`
+   - `AOBJ` -> `FAOBJ`
+   - `AORRES` -> `FAORRES`
+   - `SORRES` -> `VSORRES`
+   - `SSTAT` -> `RSSTAT`
+   - `STERM` -> `DSTERM`
+   - `UOCCUR` -> `SUOCCUR`
+   - `USTRTPT` -> `SUSTRTPT`
+   - `OSCAT` -> `QSCAT`
+
+### Regression Snapshot (ACRF 3039 UC)
+
+- Target fixes verified present: `FACAT`, `FAOBJ`, `FAORRES`, `VSORRES`, `RSSTAT`, `DSTERM`, `SUOCCUR`, `SUSTRTPT`, `QSCAT`.
+- Previously observed false tokens removed from output: `ACAT`, `AOBJ`, `AORRES`, `SORRES`, `SSTAT`, `STERM`, `UOCCUR`, `USTRTPT`, `OSCAT`.
+- Remaining leading-character-loss signal reduced to a narrow residual set (`RCAT` family).

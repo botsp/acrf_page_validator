@@ -20,6 +20,7 @@ env/
 
 # Outputs
 outputs/
+config/SDTM-MSG_v2.0_KS_highlight.pdf
 
 # Temp
 *.tmp

@@ -156,6 +156,360 @@ def _passes_annotation_text_gate(text: str, score: float, min_score: float = 1.5
     return False
 
 
+def _is_one_edit_or_less(left: str, right: str) -> bool:
+    """Return True when two tokens are equal or differ by at most one edit."""
+    if left == right:
+        return True
+
+    left_len = len(left)
+    right_len = len(right)
+    if abs(left_len - right_len) > 1:
+        return False
+
+    if left_len == right_len:
+        mismatches = sum(1 for lch, rch in zip(left, right) if lch != rch)
+        return mismatches <= 1
+
+    # Ensure `shorter` is actually the shorter token.
+    if left_len > right_len:
+        left, right = right, left
+        left_len, right_len = right_len, left_len
+
+    i = 0
+    j = 0
+    mismatch_used = False
+    while i < left_len and j < right_len:
+        if left[i] == right[j]:
+            i += 1
+            j += 1
+            continue
+        if mismatch_used:
+            return False
+        mismatch_used = True
+        j += 1
+    return True
+
+
+def _find_unique_nearby_standard_term(token: str, standard_variable_terms: Set[str]) -> str:
+    """
+    Return a unique standard variable that is one edit away from token.
+
+    This is used only as a conservative OCR typo repair helper.
+    """
+    token = (token or "").upper().strip()
+    if not token:
+        return ""
+
+    candidates = []
+    token_len = len(token)
+    for standard in standard_variable_terms:
+        if abs(len(standard) - token_len) > 1:
+            continue
+        if _is_one_edit_or_less(token, standard):
+            candidates.append(standard)
+            if len(candidates) > 1:
+                break
+    return candidates[0] if len(candidates) == 1 else ""
+
+
+def _match_any_pattern(text: str, patterns: List[str]) -> bool:
+    """Return True if any regex pattern matches text."""
+    for pattern in patterns:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+def _guess_contextual_token_fix(
+    token: str,
+    context: str,
+    standard_variable_terms: Set[str],
+    neighbor_token: str = "",
+) -> str:
+    """
+    Guess a repaired token for common OCR first-character loss patterns.
+
+    This stays conservative: only returns candidates present in standard_variable_terms.
+    """
+    token = (token or "").upper().strip()
+    if not token or token in standard_variable_terms:
+        return token
+
+    context_upper = (context or "").upper()
+    neighbor_upper = (neighbor_token or "").upper()
+
+    direct_rules = [
+        ("ACAT", "FACAT", [r"\bDISEASE\s+CHARACTERISTICS\b", r"\bCROHN", r"\bULCERATIVE\b"]),
+        ("AOBJ", "FAOBJ", [r"\bFEVER\b", r"\bCROHN", r"\bDISEASE\b"]),
+        ("AORRES", "FAORRES", [r"\bFATESTCD\b"]),
+        ("OSCAT", "QSCAT", [r"\bIBDQ\b"]),
+        ("SORRES", "VSORRES", [r"\bVSTESTCD\b", r"\bVSORRESU\b", r"\bSYSBP\b", r"\bDIABP\b"]),
+        ("SSTAT", "RSSTAT", [r"\bRSTESTCD\b", r"\bRSALL\b"]),
+        ("STERM", "DSTERM", [r"\bDSDECOD\b", r"\bVOLUNTARY\b", r"\bWITHDRAWAL\b"]),
+        ("UOCCUR", "SUOCCUR", [r"\bFORMER\b", r"\bCURRENT\b", r"\bSUST"]),
+        ("USTRTPT", "SUSTRTPT", [r"\bFORMER\b", r"\bCURRENT\b", r"\bSUST"]),
+    ]
+    for source, target, patterns in direct_rules:
+        if token != source:
+            continue
+        if target not in standard_variable_terms:
+            continue
+        if _match_any_pattern(context_upper, patterns):
+            return target
+
+    preferred_prefixes: List[str] = []
+    if (
+        _match_any_pattern(context_upper, [r"\bFATESTCD\b", r"\bFAORRES\b", r"\bFAOBJ\b", r"\bFACAT\b", r"\bFASCAT\b"])
+        or neighbor_upper.startswith("FA")
+    ):
+        preferred_prefixes.append("F")
+    if (
+        _match_any_pattern(context_upper, [r"\bVSTESTCD\b", r"\bVSORRES\b", r"\bVSORRESU\b", r"\bSYSBP\b", r"\bDIABP\b"])
+        or neighbor_upper.startswith("VS")
+    ):
+        preferred_prefixes.append("V")
+    if _match_any_pattern(context_upper, [r"\bRSTESTCD\b", r"\bRSALL\b", r"\bRSCAT\b"]):
+        preferred_prefixes.append("R")
+    if _match_any_pattern(context_upper, [r"\bDSDECOD\b", r"\bDSTERM\b", r"\bDISPOSITION\b"]):
+        preferred_prefixes.append("D")
+    if _match_any_pattern(context_upper, [r"\bSUST", r"\bSUCAT\b", r"\bTOBACCO\b", r"\bFORMER\b", r"\bCURRENT\b"]):
+        preferred_prefixes.append("S")
+    if _match_any_pattern(context_upper, [r"\bIBDQ\b", r"\bQSCAT\b", r"\bQUESTIONNAIRE\b"]):
+        preferred_prefixes.append("Q")
+
+    for prefix in preferred_prefixes:
+        candidate = f"{prefix}{token}"
+        if candidate in standard_variable_terms:
+            return candidate
+
+    nearby = _find_unique_nearby_standard_term(token, standard_variable_terms)
+    if nearby:
+        return nearby
+
+    leading_candidates = sorted(
+        candidate
+        for candidate in standard_variable_terms
+        if len(candidate) == len(token) + 1 and candidate.endswith(token)
+    )
+    if len(leading_candidates) == 1:
+        return leading_candidates[0]
+
+    if leading_candidates:
+        for prefix in preferred_prefixes:
+            for candidate in leading_candidates:
+                if candidate.startswith(prefix):
+                    return candidate
+
+    return token
+
+
+def _repair_annotation_text(text: str, standard_variable_terms: Set[str]) -> str:
+    """
+    Repair common OCR artifacts that drop/split variable names around "=".
+
+    Examples:
+    - FASC ALT=...  -> FASCAT=...
+    - ON AM=...     -> QNAM=... (in SUPP context)
+    - QONAM=...     -> QNAM=... (in SUPP context)
+    """
+    normalized = _normalize_ocr_text(text)
+    if not normalized:
+        return normalized
+
+    repaired = normalized
+    has_supp_context = bool(re.search(r"\bSUPP[A-Z]{2,8}\b", repaired, re.IGNORECASE))
+
+    if has_supp_context:
+        repaired = re.sub(
+            r"\b(?:QONAM|ONAM|INAM|JNAM|QDNAM)\s*=",
+            "QNAM=",
+            repaired,
+            flags=re.IGNORECASE,
+        )
+
+    split_lhs_pattern = re.compile(r"\b([A-Z]{2,6})\s+([A-Z]{2,8})\s*=")
+
+    def replace_split_lhs(match: re.Match) -> str:
+        left_part = match.group(1).upper()
+        right_part = match.group(2).upper()
+        merged = f"{left_part}{right_part}"
+
+        if len(merged) > 8:
+            return match.group(0)
+
+        corrected = merged
+        if has_supp_context and right_part in {"QONAM", "ONAM", "INAM", "JNAM", "QDNAM"}:
+            corrected = "QNAM"
+        elif has_supp_context and right_part == "AM" and left_part in {"QO", "QD", "QN", "ON", "IN", "JN"}:
+            corrected = "QNAM"
+        elif corrected not in standard_variable_terms:
+            nearby = _find_unique_nearby_standard_term(corrected, standard_variable_terms)
+            if nearby:
+                corrected = nearby
+
+        if corrected == merged and corrected not in standard_variable_terms:
+            return match.group(0)
+        return f"{corrected}="
+
+    repaired = split_lhs_pattern.sub(replace_split_lhs, repaired)
+    context_upper = repaired.upper()
+
+    lhs_assign_pattern = re.compile(r"\b([A-Z][A-Z0-9]{1,7})\s*=")
+
+    def replace_lhs_assign(match: re.Match) -> str:
+        lhs = match.group(1).upper()
+        corrected = _guess_contextual_token_fix(lhs, context_upper, standard_variable_terms)
+        if corrected == lhs:
+            return match.group(0)
+        return f"{corrected}="
+
+    repaired = lhs_assign_pattern.sub(replace_lhs_assign, repaired)
+
+    conditional_lhs_pattern = re.compile(r"\b([A-Z][A-Z0-9]{1,7})\s+(?=(?:when|if|then)\b)", re.IGNORECASE)
+
+    def replace_conditional_lhs(match: re.Match) -> str:
+        lhs = match.group(1).upper()
+        corrected = _guess_contextual_token_fix(lhs, context_upper, standard_variable_terms)
+        if corrected == lhs:
+            return match.group(0)
+        return f"{corrected} "
+
+    repaired = conditional_lhs_pattern.sub(replace_conditional_lhs, repaired)
+
+    slash_pair_pattern = re.compile(r"\b([A-Z][A-Z0-9]{1,7})/([A-Z][A-Z0-9]{1,7})\b")
+
+    def replace_slash_pair(match: re.Match) -> str:
+        left = match.group(1).upper()
+        right = match.group(2).upper()
+        fixed_left = _guess_contextual_token_fix(left, context_upper, standard_variable_terms, neighbor_token=right)
+        fixed_right = _guess_contextual_token_fix(right, context_upper, standard_variable_terms, neighbor_token=left)
+        if fixed_left == left and fixed_right == right:
+            return match.group(0)
+        return f"{fixed_left}/{fixed_right}"
+
+    repaired = slash_pair_pattern.sub(replace_slash_pair, repaired)
+    return _normalize_ocr_text(repaired)
+
+
+def _extract_lhs_tokens(text: str) -> List[str]:
+    """Extract normalized left-hand tokens from VAR=VALUE patterns."""
+    return [match.group(1).upper() for match in re.finditer(r"\b([A-Z][A-Z0-9]{1,7})\s*=", text or "")]
+
+
+def _needs_second_pass_ocr(
+    text: str,
+    standard_variable_terms: Set[str],
+    standard_dataset_terms: Set[str],
+) -> bool:
+    """Return True when first-pass OCR text contains high-risk corruption patterns."""
+    normalized = _normalize_ocr_text(text)
+    if not normalized:
+        return False
+
+    lhs_tokens = _extract_lhs_tokens(normalized)
+    for token in lhs_tokens:
+        if token in standard_variable_terms or token in standard_dataset_terms:
+            continue
+        # Short unknown left-hand variables often indicate OCR truncation (e.g. ACAT vs FASCAT).
+        if len(token) <= 4:
+            return True
+
+    if re.search(r"\b[A-Z]{2,6}\s+[A-Z]{2,8}\s*=", normalized):
+        return True
+    if re.search(r"\b(?:QONAM|ONAM|INAM|JNAM|QDNAM)\s*=", normalized):
+        return True
+    if re.search(r"\bSUPP[A-Z]{2,8}\b", normalized) and not re.search(r"\bQNAM\s*=", normalized):
+        return True
+    return False
+
+
+def _ocr_quality_adjustment(
+    text: str,
+    standard_variable_terms: Set[str],
+    standard_dataset_terms: Set[str],
+) -> float:
+    """
+    Extra scoring bias used to choose between first-pass and second-pass OCR results.
+    """
+    normalized = _normalize_ocr_text(text)
+    if not normalized:
+        return -5.0
+
+    adjustment = 0.0
+    if re.search(r"\bQNAM\s*=", normalized):
+        adjustment += 1.0
+    if re.search(r"\b[A-Z]{2,6}\s+[A-Z]{2,8}\s*=", normalized):
+        adjustment -= 1.2
+    if re.search(r"\b(?:QONAM|ONAM|INAM|JNAM|QDNAM)\s*=", normalized):
+        adjustment -= 1.0
+
+    lhs_tokens = _extract_lhs_tokens(normalized)
+    for token in lhs_tokens:
+        if token in standard_variable_terms or token in standard_dataset_terms:
+            adjustment += 0.2
+        elif len(token) <= 4:
+            adjustment -= 0.9
+        else:
+            adjustment -= 0.4
+    return adjustment
+
+
+def _run_second_pass_ocr(
+    gray: np.ndarray,
+    language: str,
+    tiny_roi: bool,
+    standard_variable_terms: Set[str],
+    standard_dataset_terms: Set[str],
+) -> str:
+    """
+    Run a slower OCR pass for suspicious first-pass results only.
+    """
+    second_variants: List[np.ndarray] = []
+
+    try:
+        adaptive = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+        second_variants.append(adaptive)
+    except Exception:
+        pass
+
+    try:
+        upscaled = cv2.resize(gray, None, fx=1.35, fy=1.35, interpolation=cv2.INTER_CUBIC)
+        _, upscaled_otsu = cv2.threshold(
+            upscaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+        second_variants.append(upscaled_otsu)
+    except Exception:
+        pass
+
+    if not second_variants:
+        return ""
+
+    configs = [r"--psm 7 --oem 3"] if tiny_roi else [r"--psm 7 --oem 3", r"--psm 6 --oem 3"]
+    best_text = ""
+    best_score = -999.0
+
+    for processed in second_variants:
+        for config in configs:
+            try:
+                text = _quick_ocr_text(processed, language, config)
+            except Exception:
+                continue
+            if not text:
+                continue
+            score = _score_annotation_text(text) + _ocr_quality_adjustment(
+                text,
+                standard_variable_terms,
+                standard_dataset_terms,
+            )
+            if score > best_score or (score == best_score and len(text) > len(best_text)):
+                best_score = score
+                best_text = text
+
+    return best_text
+
+
 def _extract_ocr_text_with_confidence(image: np.ndarray, language: str, config: str) -> Tuple[str, float]:
     """Run OCR once and return normalized text plus mean confidence."""
     data = pytesseract.image_to_data(
@@ -324,8 +678,15 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
     return detected_boxes
 
 
-def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
-                      margin: int = 5, language: str = "eng", debug: bool = False) -> str:
+def extract_text_ocr(
+    page_image: np.ndarray,
+    rect: Tuple[int, int, int, int],
+    margin: int = 5,
+    language: str = "eng",
+    debug: bool = False,
+    standard_variable_terms: Set[str] = None,
+    standard_dataset_terms: Set[str] = None,
+) -> str:
     """
     Extract text from a region using Tesseract OCR.
 
@@ -349,10 +710,12 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
         Extracted text string (may be empty if OCR fails)
     """
     try:
+        standard_variable_terms = standard_variable_terms or set()
+        standard_dataset_terms = standard_dataset_terms or set()
         x, y, w, h = rect
 
-        # Shrink ROI first to avoid pulling neighboring non-annotation text.
-        inset_x = max(1, int(w * 0.06))
+        # Shrink ROI first to avoid pulling neighboring text while preserving leading glyphs.
+        inset_x = max(0, int(w * 0.02))
         inset_y = max(1, int(h * 0.08))
         if (w - 2 * inset_x) >= 12 and (h - 2 * inset_y) >= 8:
             x += inset_x
@@ -464,7 +827,15 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
 
             final_text = conf_text if conf_text else candidate["text"]
             annotation_score = _score_annotation_text(final_text)
-            total_score = annotation_score * 10.0 + confidence
+            total_score = (
+                annotation_score * 10.0
+                + confidence
+                + _ocr_quality_adjustment(
+                    final_text,
+                    standard_variable_terms,
+                    standard_dataset_terms,
+                )
+            )
             results.append((total_score, annotation_score, confidence, final_text))
 
         if results:
@@ -472,6 +843,33 @@ def extract_text_ocr(page_image: np.ndarray, rect: Tuple[int, int, int, int],
             best_total, _, _, best_text = results[0]
             if best_total < 0 and len(best_text.split()) > 10:
                 return ""
+
+            best_text = _normalize_ocr_text(best_text)
+            if _needs_second_pass_ocr(
+                best_text,
+                standard_variable_terms,
+                standard_dataset_terms,
+            ):
+                second_pass_text = _run_second_pass_ocr(
+                    gray,
+                    language,
+                    tiny_roi,
+                    standard_variable_terms,
+                    standard_dataset_terms,
+                )
+                if second_pass_text:
+                    first_score = _score_annotation_text(best_text) + _ocr_quality_adjustment(
+                        best_text,
+                        standard_variable_terms,
+                        standard_dataset_terms,
+                    )
+                    second_score = _score_annotation_text(second_pass_text) + _ocr_quality_adjustment(
+                        second_pass_text,
+                        standard_variable_terms,
+                        standard_dataset_terms,
+                    )
+                    if second_score >= first_score + 0.35:
+                        return second_pass_text
             return best_text
 
         return ""
@@ -580,17 +978,37 @@ def classify_term(term: str, raw_context: str, standard_terms: Dict,
     # Level 4: Suffix/prefix match in standard_term_suffix_prefix.csv
     suffix_prefix = suffix_prefix_patterns.get("variable", set())
     for pattern in suffix_prefix:
-        if pattern.startswith("--") and upper_term.endswith(pattern[2:]):
-            return "standard_variable", "suffix_prefix"
-        if pattern.endswith("--") and upper_term.startswith(pattern[:-2]):
-            return "standard_variable", "suffix_prefix"
+        if not pattern:
+            continue
+        if pattern.startswith("--"):
+            suffix = pattern[2:]
+            if not suffix:
+                continue
+            if upper_term.endswith(suffix):
+                return "standard_variable", "suffix_prefix"
+        if pattern.endswith("--"):
+            prefix = pattern[:-2]
+            if not prefix:
+                continue
+            if upper_term.startswith(prefix):
+                return "standard_variable", "suffix_prefix"
 
     suffix_prefix = suffix_prefix_patterns.get("dataset", set())
     for pattern in suffix_prefix:
-        if pattern.startswith("--") and upper_term.endswith(pattern[2:]):
-            return "dataset_name", "suffix_prefix"
-        if pattern.endswith("--") and upper_term.startswith(pattern[:-2]):
-            return "dataset_name", "suffix_prefix"
+        if not pattern:
+            continue
+        if pattern.startswith("--"):
+            suffix = pattern[2:]
+            if not suffix:
+                continue
+            if upper_term.endswith(suffix):
+                return "dataset_name", "suffix_prefix"
+        if pattern.endswith("--"):
+            prefix = pattern[:-2]
+            if not prefix:
+                continue
+            if upper_term.startswith(prefix):
+                return "dataset_name", "suffix_prefix"
 
     # Level 5: SUPP variable check (e.g., AEPTRTPT in SUPPAE context)
     supp_pattern = r'\bSUPP[A-Z]{2,8}\b'
@@ -617,23 +1035,37 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
     Returns:
         List of (variable, dataset) tuples
     """
-    results = []
+    results: List[Tuple[str, str]] = []
+    seen: Set[Tuple[str, str]] = set()
+
+    def add_pair(var_value: str, dataset_value: str) -> None:
+        var = (var_value or "").upper().strip()
+        dataset = (dataset_value or "").upper().strip()
+        if not var or not dataset:
+            return
+        if len(var) > 8 or len(dataset) > 8:
+            return
+        key = (var, dataset)
+        if key in seen:
+            return
+        seen.add(key)
+        results.append(key)
+
+    # Pattern 0: "QNAM=AEHOSPDT in SUPPAE" -> capture (QNAM, SUPPAE)
+    pattern0 = r'([A-Z][A-Z0-9]{1,7})\s*=\s*[A-Z0-9][A-Z0-9\s/\-]{0,80}?\s+in\s+(SUPP[A-Z]{2,8})\b'
+    for match in re.finditer(pattern0, text, re.IGNORECASE):
+        add_pair(match.group(1), match.group(2))
 
     # Pattern 1: "VAR in SUPPYY" or "VAR in SUPPxx"
-    pattern1 = r'([A-Z][A-Z0-9]*?)\s+in\s+(SUPP[A-Z]{2,})'
-    for match in re.finditer(pattern1, text):
-        var = match.group(1)
-        dataset = match.group(2)
-        if var and dataset and len(var) <= 8 and len(dataset) <= 8:
-            results.append((var, dataset))
+    # Negative lookbehind avoids matching value side in "QNAM=OTHLOC in SUPPFA".
+    pattern1 = r'(?<![=A-Z0-9])([A-Z][A-Z0-9]{1,7})\s+in\s+(SUPP[A-Z]{2,8})\b'
+    for match in re.finditer(pattern1, text, re.IGNORECASE):
+        add_pair(match.group(1), match.group(2))
 
     # Pattern 2: "SUPPYY.VAR"
-    pattern2 = r'(SUPP[A-Z]{2,})\.([A-Z][A-Z0-9]*?)(?:\s|$|[,;])'
-    for match in re.finditer(pattern2, text):
-        dataset = match.group(1)
-        var = match.group(2)
-        if var and dataset and len(var) <= 8 and len(dataset) <= 8:
-            results.append((var, dataset))
+    pattern2 = r'(SUPP[A-Z]{2,8})\.([A-Z][A-Z0-9]{1,7})(?:\s|$|[,;])'
+    for match in re.finditer(pattern2, text, re.IGNORECASE):
+        add_pair(match.group(2), match.group(1))
 
     return results
 
@@ -795,8 +1227,8 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             page_idx = page_num + 1
 
             # ==================== Render page to image ====================
-            # Use 150 DPI for reasonable quality vs speed tradeoff
-            pix = page.get_pixmap(matrix=fitz.Matrix(150/72, 150/72))
+            # Use 300 DPI for better short-code recognition accuracy
+            pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))
             page_image = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
 
             # Convert RGB/RGBA to BGR for OpenCV
@@ -828,13 +1260,41 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                     continue
 
                 # Extract text via OCR
-                ocr_text = extract_text_ocr(page_image, rect, margin=1)
+                ocr_text = extract_text_ocr(
+                    page_image,
+                    rect,
+                    margin=1,
+                    standard_variable_terms=standard_terms.get("variable", set()),
+                    standard_dataset_terms=standard_terms.get("dataset", set()),
+                )
 
                 if not ocr_text or len(ocr_text.strip()) < 2:
                     debug_info["ocr_fail_count"] += 1
                     continue
 
-                ocr_text_score = _score_annotation_text(ocr_text)
+                repaired_text = _repair_annotation_text(
+                    ocr_text,
+                    standard_terms.get("variable", set()),
+                )
+                if repaired_text:
+                    first_score = _score_annotation_text(ocr_text) + _ocr_quality_adjustment(
+                        ocr_text,
+                        standard_terms.get("variable", set()),
+                        standard_terms.get("dataset", set()),
+                    )
+                    repaired_score = _score_annotation_text(repaired_text) + _ocr_quality_adjustment(
+                        repaired_text,
+                        standard_terms.get("variable", set()),
+                        standard_terms.get("dataset", set()),
+                    )
+                    if repaired_score >= first_score:
+                        ocr_text = repaired_text
+                        ocr_text_score = _score_annotation_text(ocr_text)
+                    else:
+                        ocr_text_score = _score_annotation_text(ocr_text)
+                else:
+                    ocr_text_score = _score_annotation_text(ocr_text)
+
                 if not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.5):
                     debug_info["ocr_noise_rejected_count"] += 1
                     continue
@@ -1032,4 +1492,4 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print("✅ OpenCV+OCR Parser Module Loaded Successfully (v1.0 - Image-based extraction)")
+    print("✅ OpenCV+OCR Parser Module Loaded Successfully (VERSION 2.0 - OCR refactoring release)")

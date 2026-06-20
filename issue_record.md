@@ -403,3 +403,35 @@ Text semantic gate（你的规则二次过滤）
 
 输出策略
 RawTexts 只记录通过上述 gate 的框内全文（不截断），并保留 rejection reason 统计，便于后续调阈值。
+
+---------------------------------------------------------
+OCR 优化
+
+
+| Classification | Name | Pages | PageCount | Category     | RawTexts                                           |
+|----------------|------|-------|-----------|--------------|----------------------------------------------------|
+| Domain         | CO   | 28    | 1         | dataset_name | CO, MDOSERO                                        |
+| Domain         | CP   | 53    | 1         | dataset_name | CP, MPOSERG, CP, MDOSE                             |
+| Domain         | DD   | 51    | 1         | dataset_name | S=Adverse Events, DD=Death Details                 |
+
+加业务规则比换包更关键：dataset_name 只从页眉 XX=... 提取、必须命中标准域名表、2 字母低置信度不直接落库。
+
+
+不靠“全量词表”也能提准，关键做这 5 点：
+
+ROI先提纯：提高渲染到 300–450 DPI，只截注释框主体，去掉右侧复选框/线条干扰。
+双通道识别：同一ROI跑两次——一次读整行文本，一次专门读短码（[A-Z0-9]{2,8}，白名单字符）。
+多配置投票：短码通道用 psm 7/8/13 + 2~3种预处理，按一致性选结果，避免单次误判。
+软纠错（非硬词表）：只用格式和上下文约束（如 XX=...、行首位置、同页重复一致性），未知 domain 允许保留，不强行改成已知词。
+不确定就标记：低一致性结果输出 uncertain，别硬落成 CO/CP 这类“看似合法但错误”的码。
+
+
+1.opendataloader pdf怎么样，相较于OPENCV+Tesseract处理flattened annotation PDF，我这个场景是不是更适合opendataloader
+2.其实我一开始选择OpenCV + Tesseract是不是就不太对，甚至marker都不如
+3.那对于non-flattened pdf，我能从结构提取annotation的，是不是OpenDataLoader 也要优于pymupdf
+
+
+
+1.将目前的OPENCV+Tesseract，替换为opendataloader方案；
+2.只做最小限度更新，绝对不能改到有关XML, non-flattened pdf-pymupdf, cross validation report的部分
+3.
