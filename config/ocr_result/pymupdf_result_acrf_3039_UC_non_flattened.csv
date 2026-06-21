@@ -1,0 +1,347 @@
+Classification,Name,Pages,PageCount,Category,RawTexts
+Domain,AE,"49,50,51,55",4,dataset_name,AE=Adverse Events | CM linked to related AE or MH record via RELREC
+Domain,CM,"27,28,29,53,54,55",6,dataset_name,CM=Concomitant Medications | CM linked to related AE or MH record via RELREC
+Domain,DD,51,1,dataset_name,DD=Death Details
+Domain,DM,"10,13,14,49,64",5,dataset_name,DM=Demographics
+Domain,DS,"14,17,62,63",4,dataset_name,DS=Disposition
+Domain,EC,"46,47,61",3,dataset_name,EC=Exposure as Collected | EC linked to relative FA record via RELREC
+Domain,FA,"18,19,20,21,22,23,46,47",8,dataset_name,FA=Findings About | EC linked to relative FA record via RELREC
+Domain,IE,16,1,dataset_name,IE=Inclusion/Exclusion Criteria Not Met
+Domain,IS,58,1,dataset_name,
+Domain,LB,"44,45",2,dataset_name,LB=Laboratory Test Results
+Domain,MH,"18,21,25,55",4,dataset_name,MH=Medical History | CM linked to related AE or MH record via RELREC
+Domain,PC,"56,57",2,dataset_name,PC=Pharmacokinetic Concentrations
+Domain,PE,"30,31,32,33,34",5,dataset_name,PE=Physical Examination
+Domain,PR,"18,21",2,dataset_name,PR=Procedures
+Domain,QS,40,1,dataset_name,QS=Questionnaires
+Domain,RELREC,"47,55",2,dataset_name,EC linked to relative FA record via RELREC | CM linked to related AE or MH record via RELREC
+Domain,RS,"41,42,43",3,dataset_name,RS=Disease Response
+Domain,SU,15,1,dataset_name,SU=Substance Use
+Domain,SUPPAE,"49,50,51",3,dataset_name,QNAM=AERELPR in SUPPAE | QNAM=HYREACFL in SUPPAE | QNAM=AESI in SUPPAE | QNAM=OTHFL in SUPPAE | QNAM=MALIGFL in SUPPAE | QNAM=PMLFL in SUPPAE | QNAM=INFECTFL in SUPPAE | QNAM=AEHOSPDT in SUPPAE | QNAM=AEDISCDT in SUPPAE
+Domain,SUPPCM,55,1,dataset_name,QNAM=CMINDAE1 in SUPPCM | QNAM=CMINDAE2 in SUPPCM | QNAM=CMINDAE3 in SUPPCM | QNAM=CMINDMH1 in SUPPCM | QNAM=CMINDMH2 in SUPPCM | QNAM=CMINDMH3 in SUPPCM
+Domain,SUPPDM,"10,13,14,64",4,dataset_name,DIAGGRP in SUPPDM | QNAM=RACESASN in SUPPDM | QNAM=RACEASN in SUPPDM when RACE=MULTIPLE | QNAM=PROTVRSN in SUPPDM | QNAM=STDYST_1 in SUPPDM | QNAM=STDYSTYN in SUPPDM
+Domain,SUPPDS,17,1,dataset_name,QNAM=ADSDECOD in SUPPDS | QNAM=SCRSTD in SUPPDS | QNAM=SCR1STST in SUPPDS | QNAM=SCR1STNO in SUPPDS
+Domain,SUPPEC,"46,61",2,dataset_name,QNAM=ECACN in SUPPEC | QNAM=EVLDTL in SUPPEC | QNAM=EVLDTL in SUPPEC when Other
+Domain,SUPPFA,"18,19,21,22",4,dataset_name,QNAM=OTHLOC in SUPPFA | QNAM=OTHEXMN in SUPPFA | QNAM=OTHDSLOC in SUPPFA
+Domain,SUPPLB,44,1,dataset_name,QNAM=LBSUCAT in SUPPLB when LBSTAT^=NOT DONE
+Domain,SUPPMH,"18,21",2,dataset_name,QNAM=MHEVDTYP and QVAL=SYMPTOM ONSET in SUPPMH | QNAM=MHEVDTYP and QVAL=DIAGNOSIS in SUPPMH
+Domain,SUPPSU,15,1,dataset_name,SUNCF in SUPPSU
+Domain,SUPPSV,60,1,dataset_name,QNAM=SVOCCUR in SUPPSV; N when No Visit; Y when the others selected. | QNAM=MISSASMT in SUPPSV; Y when Visit with Missed Assessments | QNAM=SVREASOC in SUPPSV | QNAM=SVREASOC in SUPPSV when Other
+Domain,SUPPXM,"10,13,14",3,dataset_name,DIAGGRP in SUPPXM | QNAM=RACEASN in SUPPXM when RACE=MULTIPLE | QNAM=RACESASN in SUPPXM | QNAM=PROTVRSN in SUPPXM
+Domain,SV,"11,12,59,60,61",5,dataset_name,SV=Subject Visits
+Domain,VS,"35,36,37,38,39",5,dataset_name,VS=Vital Signs
+Domain,XM,"10,13,14,49",4,dataset_name,XM=Demographics (Multiple Screenings)
+Variable,ADSDECOD,17,1,standard_variable,QNAM=ADSDECOD in SUPPDS
+Variable,AEACN,49,1,standard_variable,AEACN
+Variable,AEDISCDT,51,1,standard_variable,QNAM=AEDISCDT in SUPPAE
+Variable,AEENDTC,49,1,standard_variable,AEENDTC
+Variable,AEHOSPDT,51,1,standard_variable,QNAM=AEHOSPDT in SUPPAE
+Variable,AEOUT,49,1,standard_variable,AEOUT
+Variable,AEPATT,49,1,standard_variable,AEPATT
+Variable,AEREL,"49,51",2,standard_variable,AEREL
+Variable,AERELPR,49,1,standard_variable,QNAM=AERELPR in SUPPAE
+Variable,AESCONG,51,1,standard_variable,AESCONG
+Variable,AESDISAB,51,1,standard_variable,AESDISAB
+Variable,AESDTH,51,1,standard_variable,AESDTH
+Variable,AESER,"49,51",2,standard_variable,AESER | AESER=Y
+Variable,AESER=Y,51,1,standard_variable,AESER=Y
+Variable,AESEV,49,1,standard_variable,AESEV
+Variable,AESHOSP,51,1,standard_variable,AESHOSP
+Variable,AESI,49,1,standard_variable,QNAM=AESI in SUPPAE
+Variable,AESLIFE,51,1,standard_variable,AESLIFE
+Variable,AESMIE,51,1,standard_variable,AESMIE
+Variable,AESOD,51,1,standard_variable,AESOD
+Variable,AESPID,51,1,standard_variable,AESPID
+Variable,AESTDTC,"49,51",2,standard_variable,AESTDTC
+Variable,AESTRTPT,49,1,standard_variable,AESTRTPT=BEFORE and AESTTPT=FIRST DOSE OF STUDY TREATMENT if Yes is selected
+Variable,AESTTPT,49,1,standard_variable,AESTRTPT=BEFORE and AESTTPT=FIRST DOSE OF STUDY TREATMENT if Yes is selected
+Variable,AESTTPT=FIRST DOSE OF STUDY TREATMENT,49,1,standard_variable,AESTTPT=FIRST DOSE OF STUDY TREATMENT
+Variable,AETERM,"49,51",2,standard_variable,AETERM
+Variable,AGE,13,1,standard_variable,AGE
+Variable,AGEU,13,1,standard_variable,AGEU
+Variable,BODSYSOT,34,1,standard_variable,QNAM=BODSYSOT in SUPPPE
+Variable,BRTHDTC,"10,13",2,standard_variable,BRTHDTC
+Variable,CELSIUS,"19,22",2,standard_variable,FAOBJ=FEVER OVER 37.8 DEGREES CELSIUS
+Variable,CMCAT,"27,53",2,standard_variable,CMCAT
+Variable,CMDOSE,"27,53",2,standard_variable,CMDOSE
+Variable,CMDOSFRQ,"27,28,53,54",4,standard_variable,CMDOSFRQ
+Variable,CMDOSTXT,"27,53",2,standard_variable,CMDOSTXT
+Variable,CMDOSU,"27,53",2,standard_variable,CMDOSU
+Variable,CMENDTC,"29,55",2,standard_variable,CMENDTC
+Variable,CMENRTPT,55,1,standard_variable,CMENRTPT
+Variable,CMINDAE1,55,1,standard_variable,QNAM=CMINDAE1 in SUPPCM
+Variable,CMINDAE2,55,1,standard_variable,QNAM=CMINDAE2 in SUPPCM
+Variable,CMINDAE3,55,1,standard_variable,QNAM=CMINDAE3 in SUPPCM
+Variable,CMINDC,"29,55",2,standard_variable,CMINDC
+Variable,CMINDMH1,55,1,standard_variable,QNAM=CMINDMH1 in SUPPCM
+Variable,CMINDMH2,55,1,standard_variable,QNAM=CMINDMH2 in SUPPCM
+Variable,CMINDMH3,55,1,standard_variable,QNAM=CMINDMH3 in SUPPCM
+Variable,CMROUTE,"28,29,54,55",4,standard_variable,CMROUTE
+Variable,CMSTDTC,"29,55",2,standard_variable,CMSTDTC
+Variable,CMSTRTPT,55,1,standard_variable,CMSTRTPT
+Variable,CMTRT,"27,53",2,standard_variable,CMTRT
+Variable,COUNTRY,13,1,standard_variable,COUNTRY
+Variable,CRITERIA,17,1,standard_variable,DSTERM when VOLUNTARY WITHDRAWAL or OTHER or INC/EXC CRITERIA
+Variable,DDORRES,51,1,standard_variable,DDORRES when DDTESTCD=GENCDTH | DDORRES when DDTESTCD=AUTOPIND | DDORRES when DDTESTCD=DTHCOIND
+Variable,DDSPID,51,1,standard_variable,DDSPID
+Variable,DDTESTCD,51,1,standard_variable,DDORRES when DDTESTCD=GENCDTH | DDORRES when DDTESTCD=AUTOPIND | DDORRES when DDTESTCD=DTHCOIND
+Variable,DDTESTCD=AUTOPIND,51,1,standard_variable,DDTESTCD=AUTOPIND
+Variable,DDTESTCD=DTHCOIND,51,1,standard_variable,DDTESTCD=DTHCOIND
+Variable,DDTESTCD=GENCDTH,51,1,standard_variable,DDTESTCD=GENCDTH
+Variable,DEGREES,"19,22",2,standard_variable,FAOBJ=FEVER OVER 37.8 DEGREES CELSIUS
+Variable,DIAGGRP,"10,14",2,standard_variable,DIAGGRP in SUPPDM | DIAGGRP in SUPPXM
+Variable,DISEASE,"18,19,20",3,standard_variable,FACAT=DISEASE CHARACTERISTICS CROHN'S DISEASE | FAOBJ=CROHN'S DISEASE
+Variable,DSCAT,"14,17,62,63",4,standard_variable,DSCAT=PROTOCOL MILESTONE | DSCAT=DISPOSITION EVENT
+Variable,DSCAT=DISPOSITION EVENT,"17,62,63",3,standard_variable,DSCAT=DISPOSITION EVENT
+Variable,DSCAT=PROTOCOL MILESTONE,14,1,standard_variable,DSCAT=PROTOCOL MILESTONE
+Variable,DSDECOD,"14,17,62,63",4,standard_variable,DSSTDTC when DSTERM/DSDECOD=INFORMED CONSENT OBTAINED | DSDECOD=SCREEN FAILURE | If No DSTERM/DSDECOD=COMPLETED | DSDECOD | DSTERM when DSDECOD=VOLUNTARY WITHDRAWAL or OTHER
+Variable,DSDECOD=COMPLETED,"62,63",2,standard_variable,DSDECOD=COMPLETED
+Variable,DSDECOD=INFORMED CONSENT OBTAINED,14,1,standard_variable,DSDECOD=INFORMED CONSENT OBTAINED
+Variable,DSDECOD=SCREEN FAILURE,17,1,standard_variable,DSDECOD=SCREEN FAILURE
+Variable,DSSCAT,"62,63",2,standard_variable,DSSCAT=END OF TREATMENT/END OF EXTENSION TREATMENT | DSSCAT=END OF STUDY
+Variable,DSSCAT=END OF STUDY,63,1,standard_variable,DSSCAT=END OF STUDY
+Variable,DSSCAT=END OF TREATMENT/END OF EXTENSION TREATMENT,62,1,standard_variable,DSSCAT=END OF TREATMENT/END OF EXTENSION TREATMENT
+Variable,DSSTDTC,"14,17",2,standard_variable,DSSTDTC when DSTERM/DSDECOD=INFORMED CONSENT OBTAINED | DSSTDTC
+Variable,DSTERM,"14,17,62,63",4,standard_variable,DSSTDTC when DSTERM/DSDECOD=INFORMED CONSENT OBTAINED | DSTERM | DSTERM when VOLUNTARY WITHDRAWAL or OTHER or INC/EXC CRITERIA | If No DSTERM/DSDECOD=COMPLETED | DSTERM when DSDECOD=VOLUNTARY WITHDRAWAL or OTHER | DSTERM when DSTERM=VOLUNTARY WITHDRAWAL or OTHER
+Variable,DSTERM=COMPLETED,"62,63",2,standard_variable,DSTERM=COMPLETED
+Variable,DSTERM=INFORMED CONSENT OBTAINED,14,1,standard_variable,DSTERM=INFORMED CONSENT OBTAINED
+Variable,DTHDTC,49,1,standard_variable,DTHDTC when DTHFL=Y
+Variable,DTHFL,49,1,standard_variable,DTHFL=Y when Fatal | DTHDTC when DTHFL=Y
+Variable,DTHFL=Y,49,1,standard_variable,DTHFL=Y
+Variable,ECACN,46,1,standard_variable,QNAM=ECACN in SUPPEC
+Variable,ECADJ,46,1,standard_variable,ECADJ
+Variable,ECDOSE,46,1,standard_variable,ECDOSE
+Variable,ECDOSFRM,46,1,standard_variable,ECDOSFRM
+Variable,ECDOSU,46,1,standard_variable,ECDOSU
+Variable,ECENDTC,46,1,standard_variable,ECENDTC
+Variable,ECROUTE,46,1,standard_variable,ECROUTE
+Variable,ECSTDTC,46,1,standard_variable,ECSTDTC
+Variable,ECTRT,46,1,standard_variable,ECTRT
+Variable,ETHNIC,13,1,standard_variable,ETHNIC
+Variable,EVLDTL,61,1,standard_variable,QNAM=EVLDTL in SUPPEC | QNAM=EVLDTL in SUPPEC when Other
+Variable,EXC,17,1,standard_variable,DSTERM when VOLUNTARY WITHDRAWAL or OTHER or INC/EXC CRITERIA
+Variable,FACAT,"18,21,46",3,standard_variable,FACAT=DISEASE CHARACTERISTICS CROHN'S DISEASE | FACAT=DISEASE CHARACTERISTICS ULCERATIVE COLITIS | FACAT= OVERDOSE
+Variable,FACAT=DISEASE CHARACTERISTICS ULCERATIVE COLITIS,21,1,standard_variable,FACAT=DISEASE CHARACTERISTICS ULCERATIVE COLITIS
+Variable,FACAT=OVERDOSE,46,1,standard_variable,FACAT=OVERDOSE
+Variable,FADTC,46,1,standard_variable,FADTC
+Variable,FAEVLINT,"18,19,21,22",4,standard_variable,FAEVLINT=-P12M | FAEVLINT=-P1W
+Variable,FAOBJ,"18,19,20,21,22,23,46",7,standard_variable,"FAOBJ=ACUTE EXACERBATIONS | FAOBJ=HOSPITALIZATIONS | FAOBJ=COLON | FAOBJ=OTHER | FAOBJ=ILEUM | FAOBJ= SURGERY FOR DISEASE | FAOBJ= FISTULIZING DISEASE | FAOBJ=ARTHRITIS/ARTHRALGIA | FAOBJ=IRITIS/UVEITIS | FAOBJ=ERYTHEMA NODOSUM | FAOBJ=PYODERMA GANGRENOSUM | FAOBJ=APHTHOUS STOMATITIS | FAOBJ=ANAL FISSURE | FAOBJ=ANAL FISTULA | FAOBJ=ABSCESS | FAOBJ=FEVER OVER 37.8 DEGREES CELSIUS | FAOBJ=CROHN'S DISEASE | FAOBJ=PROCTOSIGMOIDITIS | FAOBJ=LEFT SIDED COLITIS | FAOBJ=EXTENSIVE COLITIS | FAOBJ=PANCOLITIS | FAOBJ = SURGERY FOR DISEASE | FAOBJ=PROCTITIS | FAOBJ=ULCERATIVE COLITIS | FAOBJ"
+Variable,FAOBJ=ABSCESS,"19,22",2,standard_variable,FAOBJ=ABSCESS
+Variable,FAOBJ=ACUTE EXACERBATIONS,"18,21",2,standard_variable,FAOBJ=ACUTE EXACERBATIONS
+Variable,FAOBJ=ANAL FISSURE,19,1,standard_variable,FAOBJ=ANAL FISSURE
+Variable,FAOBJ=ANAL FISTULA,19,1,standard_variable,FAOBJ=ANAL FISTULA
+Variable,FAOBJ=APHTHOUS STOMATITIS,"19,22",2,standard_variable,FAOBJ=APHTHOUS STOMATITIS
+Variable,FAOBJ=ARTHRITIS/ARTHRALGIA,"18,22",2,standard_variable,FAOBJ=ARTHRITIS/ARTHRALGIA
+Variable,FAOBJ=COLON,18,1,standard_variable,FAOBJ=COLON
+Variable,FAOBJ=ERYTHEMA NODOSUM,"19,22",2,standard_variable,FAOBJ=ERYTHEMA NODOSUM
+Variable,FAOBJ=EXTENSIVE COLITIS,21,1,standard_variable,FAOBJ=EXTENSIVE COLITIS
+Variable,FAOBJ=FISTULIZING DISEASE,18,1,standard_variable,FAOBJ=FISTULIZING DISEASE
+Variable,"FAOBJ=HOSPITALIZATIONS","18,21",2,standard_variable,"FAOBJ=HOSPITALIZATIONS"
+Variable,FAOBJ=ILEUM,18,1,standard_variable,FAOBJ=ILEUM
+Variable,FAOBJ=IRITIS/UVEITIS,"19,22",2,standard_variable,FAOBJ=IRITIS/UVEITIS
+Variable,FAOBJ=LEFT SIDED COLITIS,21,1,standard_variable,FAOBJ=LEFT SIDED COLITIS
+Variable,FAOBJ=OTHER,"18,19,21,22",4,standard_variable,FAOBJ=OTHER
+Variable,FAOBJ=PANCOLITIS,21,1,standard_variable,FAOBJ=PANCOLITIS
+Variable,FAOBJ=PROCTITIS,21,1,standard_variable,FAOBJ=PROCTITIS
+Variable,FAOBJ=PROCTOSIGMOIDITIS,21,1,standard_variable,FAOBJ=PROCTOSIGMOIDITIS
+Variable,FAOBJ=PYODERMA GANGRENOSUM,"19,22",2,standard_variable,FAOBJ=PYODERMA GANGRENOSUM
+Variable,FAOBJ=SURGERY FOR DISEASE,"18,21",2,standard_variable,FAOBJ=SURGERY FOR DISEASE
+Variable,FAOBJ=ULCERATIVE COLITIS,"22,23",2,standard_variable,FAOBJ=ULCERATIVE COLITIS
+Variable,FAORRES,"18,19,20,21,22,23,46,47",8,standard_variable,FAORRES when FATESTCD=OCCUR | FAORRES when FATESTCD=NUMOCCUR | FAORRES when FATESTCD=OCCENDTC | FAORRES when FATESTCD=OCENRTPT | FAORRES when FATESTCD=HOSPREAS | FAORRES when FATESTCD=DESCRIB | FAORRES when FATESTCD=CLNRSPC | FAORRES when FATESTCD=SLRSPC | FAORRES when FATESTCD=ELGEXPL | FAORRES when FATESTCD=ODNAT | FAORRES when FATESTCD=ODDET | FAORRES when FATESTCD=ODAE | FAORRES when FATESTCD=ODSTXSPM
+Variable,FASCAT,"18,19,21,22,23",5,standard_variable,"FASCAT=LOCATION OF DISEASE | FASCAT= EXTRAINTESTINAL MANIFESTATIONS | FASCAT=INCLUSION CRITERIA | FASCAT=EXTRAINTESTINAL MANIFESTATIONS | FASCAT= INCLUSION CRITERIA"
+Variable,FASCAT=EXTRAINTESTINAL MANIFESTATIONS,"18,22",2,standard_variable,FASCAT=EXTRAINTESTINAL MANIFESTATIONS
+Variable,FASCAT=INCLUSION CRITERIA,"19,22,23",3,standard_variable,FASCAT=INCLUSION CRITERIA
+Variable,FASCAT=LOCATION OF DISEASE,"18,21",2,standard_variable,FASCAT=LOCATION OF DISEASE
+Variable,FATESTCD,"18,19,20,21,22,23,46,47",8,standard_variable,FAORRES when FATESTCD=OCCUR | FAORRES when FATESTCD=NUMOCCUR | FAORRES when FATESTCD=OCCENDTC | FAORRES when FATESTCD=OCENRTPT | FAORRES when FATESTCD=HOSPREAS | FAORRES when FATESTCD=DESCRIB | FAORRES when FATESTCD=CLNRSPC | FAORRES when FATESTCD=SLRSPC | FAORRES when FATESTCD=ELGEXPL | FAORRES when FATESTCD=ODNAT | FAORRES when FATESTCD=ODDET | FAORRES when FATESTCD=ODAE | FAORRES when FATESTCD=ODSTXSPM
+Variable,FATESTCD=CLNRSPC,"19,22,23",3,standard_variable,FATESTCD=CLNRSPC
+Variable,FATESTCD=DESCRIB,"18,22",2,standard_variable,FATESTCD=DESCRIB
+Variable,FATESTCD=ELGEXPL,"20,23",2,standard_variable,FATESTCD=ELGEXPL
+Variable,FATESTCD=HOSPREAS,"18,21",2,standard_variable,FATESTCD=HOSPREAS
+Variable,FATESTCD=NUMOCCUR,"18,21,22",3,standard_variable,FATESTCD=NUMOCCUR
+Variable,FATESTCD=OCCENDTC,"18,21",2,standard_variable,FATESTCD=OCCENDTC
+Variable,FATESTCD=OCCUR,"18,19,21,22",4,standard_variable,FATESTCD=OCCUR
+Variable,FATESTCD=OCENRTPT,"18,21",2,standard_variable,FATESTCD=OCENRTPT
+Variable,FATESTCD=ODAE,46,1,standard_variable,FATESTCD=ODAE
+Variable,FATESTCD=ODDET,46,1,standard_variable,FATESTCD=ODDET
+Variable,FATESTCD=ODNAT,46,1,standard_variable,FATESTCD=ODNAT
+Variable,FATESTCD=ODSTXSPM,47,1,standard_variable,FATESTCD=ODSTXSPM
+Variable,FATESTCD=SLRSPC,"19,20,23",3,standard_variable,FATESTCD=SLRSPC
+Variable,HYREACFL,49,1,standard_variable,QNAM=HYREACFL in SUPPAE
+Variable,IETESTCD,16,1,standard_variable,IETESTCD
+Variable,INC,17,1,standard_variable,DSTERM when VOLUNTARY WITHDRAWAL or OTHER or INC/EXC CRITERIA
+Variable,INFECTFL,50,1,standard_variable,QNAM=INFECTFL in SUPPAE
+Variable,ISCAT,58,1,standard_variable,ISCAT=AVA BLOOD COLLECTION
+Variable,ISCAT=AVA BLOOD COLLECTION,58,1,standard_variable,ISCAT=AVA BLOOD COLLECTION
+Variable,ISDTC,58,1,standard_variable,Time part of ISDTC | Date part of ISDTC
+Variable,ISREASND,58,1,standard_variable,"ISSTAT=NOT DONE and ISREASND=THE SAMPLE WAS NOT COLLECTED when ISTESTCD=ISALL | ISSTAT=NOT DONE and ISREASND=IT IS UNKNOWN WHETHER THE SAMPLE WAS COLLECTED, OR NOT when ISTESTCD=ISALL"
+Variable,ISREASND=THE SAMPLE WAS NOT COLLECTED,58,1,standard_variable,ISREASND=THE SAMPLE WAS NOT COLLECTED
+Variable,ISSPEC,58,1,standard_variable,ISSPEC=SERUM
+Variable,ISSPEC=SERUM,58,1,standard_variable,ISSPEC=SERUM
+Variable,ISSTAT,58,1,standard_variable,"ISSTAT=NOT DONE and ISREASND=THE SAMPLE WAS NOT COLLECTED when ISTESTCD=ISALL | ISSTAT=NOT DONE and ISREASND=IT IS UNKNOWN WHETHER THE SAMPLE WAS COLLECTED, OR NOT when ISTESTCD=ISALL"
+Variable,ISTESTCD,58,1,standard_variable,"ISSTAT=NOT DONE and ISREASND=THE SAMPLE WAS NOT COLLECTED when ISTESTCD=ISALL | ISSTAT=NOT DONE and ISREASND=IT IS UNKNOWN WHETHER THE SAMPLE WAS COLLECTED, OR NOT when ISTESTCD=ISALL"
+Variable,ISTESTCD=ISALL,58,1,standard_variable,ISTESTCD=ISALL
+Variable,LBCAT,"44,45",2,standard_variable,LBCAT | LBCAT=URINALYSIS
+Variable,LBCAT=URINALYSIS,45,1,standard_variable,LBCAT=URINALYSIS
+Variable,LBDTC,"44,45",2,standard_variable,LBDTC
+Variable,LBORRES,45,1,standard_variable,LBORRES
+Variable,LBSCAT,44,1,standard_variable,LBSCAT when LBSTAT=NOT DONE
+Variable,LBSPEC,45,1,standard_variable,LBSPEC
+Variable,LBSTAT,"44,45",2,standard_variable,LBSTAT=NOT DONE when LBTESTCD=LBALL | QNAM=LBSUCAT in SUPPLB when LBSTAT^=NOT DONE | LBSCAT when LBSTAT=NOT DONE | LBSTAT=NOT DONE
+Variable,LBSTAT=NOT DONE,"44,45",2,standard_variable,LBSTAT=NOT DONE
+Variable,LBSTRESC,45,1,standard_variable,LBSTRESC
+Variable,LBSUCAT,44,1,standard_variable,QNAM=LBSUCAT in SUPPLB when LBSTAT^=NOT DONE
+Variable,LBTEST,45,1,standard_variable,LBTEST
+Variable,LBTESTCD,"44,45",2,standard_variable,LBSTAT=NOT DONE when LBTESTCD=LBALL | LBTESTCD=HCG
+Variable,LBTESTCD=HCG,45,1,standard_variable,LBTESTCD=HCG
+Variable,LBTESTCD=LBALL,44,1,standard_variable,LBTESTCD=LBALL
+Variable,MALIGFL,50,1,standard_variable,QNAM=MALIGFL in SUPPAE
+Variable,MHCAT,"18,21,25",3,standard_variable,MHCAT=DISEASE CHARACTERISTICS | MHCAT=GENERAL MEDICAL HISTORY
+Variable,MHCAT=DISEASE CHARACTERISTICS,"18,21",2,standard_variable,MHCAT=DISEASE CHARACTERISTICS
+Variable,MHCAT=GENERAL MEDICAL HISTORY,25,1,standard_variable,MHCAT=GENERAL MEDICAL HISTORY
+Variable,MHENDTC,25,1,standard_variable,MHENDTC
+Variable,MHENRTPT,25,1,standard_variable,MHENRTPT
+Variable,MHSTDTC,"18,21,25",3,standard_variable,MHSTDTC
+Variable,MHTERM,"18,21,25",3,standard_variable,MHTERM
+Variable,MISSASMT,60,1,standard_variable,QNAM=MISSASMT in SUPPSV; Y when Visit with Missed Assessments
+Variable,ONSET,"18,21",2,standard_variable,QNAM=MHEVDTYP and QVAL=SYMPTOM ONSET in SUPPMH
+Variable,OTHDSLOC,21,1,standard_variable,QNAM=OTHDSLOC in SUPPFA
+Variable,OTHER,"17,62,63",3,standard_variable,DSTERM when VOLUNTARY WITHDRAWAL or OTHER or INC/EXC CRITERIA | DSTERM when DSDECOD=VOLUNTARY WITHDRAWAL or OTHER | DSTERM when DSTERM=VOLUNTARY WITHDRAWAL or OTHER
+Variable,OTHEXMN,"19,22",2,standard_variable,QNAM=OTHEXMN in SUPPFA
+Variable,OTHFL,50,1,standard_variable,QNAM=OTHFL in SUPPAE
+Variable,OTHLOC,18,1,standard_variable,QNAM=OTHLOC in SUPPFA
+Variable,P12M,"18,21",2,standard_variable,FAEVLINT=-P12M | PREVLINT=-P12M
+Variable,P1W,"19,22",2,standard_variable,FAEVLINT=-P1W
+Variable,PCDTC,"56,57",2,standard_variable,Date part of PCDTC | Time part of PCDTC
+Variable,PCREASND,57,1,standard_variable,PCREASND
+Variable,PCSPEC,56,1,standard_variable,PCSPEC=SERUM
+Variable,PCSPEC=SERUM,56,1,standard_variable,PCSPEC=SERUM
+Variable,PCSTAT,57,1,standard_variable,PCSTAT=NOT DONE
+Variable,PCSTAT=NOT DONE,57,1,standard_variable,PCSTAT=NOT DONE
+Variable,PCTPT,56,1,standard_variable,PCTPT
+Variable,PEORRES,"30,31,32,33,34",5,standard_variable,PEORRES when PETESTCD=EYES | PEORRES when PETESTCD=ENT | PEORRES when PETESTCD=CARDIO | PEORRES when PETESTCD=RESP | PEORRES when PETESTCD=GASTRO | PEORRES when PETESTCD=DERM | PEORRES when PETESTCD=MUSC | PEORRES when PETESTCD=EXTREM | PEORRES when PETESTCD=NERV | PEORRES when PETESTCD=LYMPH | PEORRES when PETESTCD=OTHER
+Variable,PESTAT,"30,31,32,33,34",5,standard_variable,PESTAT=NOT DONE when Not Done
+Variable,PESTAT=NOT DONE,"30,31,32,33,34",5,standard_variable,PESTAT=NOT DONE
+Variable,PETESTCD,"30,31,32,33,34",5,standard_variable,PETESTCD=EYES | PEORRES when PETESTCD=EYES | PETESTCD=ENT | PEORRES when PETESTCD=ENT | PETESTCD=CARDIO | PEORRES when PETESTCD=CARDIO | PETESTCD=RESP | PEORRES when PETESTCD=RESP | PETESTCD=GASTRO | PEORRES when PETESTCD=GASTRO | PETESTCD=DERM | PEORRES when PETESTCD=DERM | PETESTCD=MUSC | PEORRES when PETESTCD=MUSC | PETESTCD=EXTREM | PEORRES when PETESTCD=EXTREM | PETESTCD=NERV | PEORRES when PETESTCD=NERV | PETESTCD=LYMPH | PEORRES when PETESTCD=LYMPH | PEORRES when PETESTCD=OTHER | PETESTCD=OTHER
+Variable,PETESTCD=CARDIO,"30,31",2,standard_variable,PETESTCD=CARDIO
+Variable,PETESTCD=DERM,32,1,standard_variable,PETESTCD=DERM
+Variable,PETESTCD=ENT,30,1,standard_variable,PETESTCD=ENT
+Variable,PETESTCD=EXTREM,33,1,standard_variable,PETESTCD=EXTREM
+Variable,PETESTCD=EYES,30,1,standard_variable,PETESTCD=EYES
+Variable,PETESTCD=GASTRO,"31,32",2,standard_variable,PETESTCD=GASTRO
+Variable,PETESTCD=LYMPH,"33,34",2,standard_variable,PETESTCD=LYMPH
+Variable,PETESTCD=MUSC,32,1,standard_variable,PETESTCD=MUSC
+Variable,PETESTCD=NERV,33,1,standard_variable,PETESTCD=NERV
+Variable,PETESTCD=OTHER,34,1,standard_variable,PETESTCD=OTHER
+Variable,PETESTCD=RESP,31,1,standard_variable,PETESTCD=RESP
+Variable,PMLFL,50,1,standard_variable,QNAM=PMLFL in SUPPAE
+Variable,PRCAT,"18,21",2,standard_variable,PRCAT=DISEASE CHARACTERISTICS
+Variable,PRCAT=DISEASE CHARACTERISTICS,"18,21",2,standard_variable,PRCAT=DISEASE CHARACTERISTICS
+Variable,PREVLINT,"18,21",2,standard_variable,PREVLINT=-P12M
+Variable,PROCCUR,"18,21",2,standard_variable,PROCCUR
+Variable,PROTVRSN,14,1,standard_variable,QNAM=PROTVRSN in SUPPDM | QNAM=PROTVRSN in SUPPXM
+Variable,PRPRESP,"18,21",2,standard_variable,PRPRESP=Y
+Variable,PRPRESP=Y,"18,21",2,standard_variable,PRPRESP=Y
+Variable,PRSTDTC,"18,21",2,standard_variable,PRSTDTC
+Variable,PRTRT,"18,21",2,standard_variable,"PRTRT=COLONOSCOPY"
+Variable,PRTRT=COLONOSCOPY,"18,21",2,standard_variable,PRTRT=COLONOSCOPY
+Variable,QNAM,"13,14,17,18,19,21,22,34,44,46,49,50,51,55,60,61,64",17,standard_variable,QNAM=RACESASN in SUPPDM | QNAM=RACEASN in SUPPDM when RACE=MULTIPLE | QNAM=RACEASN in SUPPXM when RACE=MULTIPLE | QNAM=RACESASN in SUPPXM | QNAM=PROTVRSN in SUPPDM | QNAM=PROTVRSN in SUPPXM | QNAM=ADSDECOD in SUPPDS | QNAM=SCRSTD in SUPPDS | QNAM=SCR1STST in SUPPDS | QNAM=SCR1STNO in SUPPDS | QNAM=OTHLOC in SUPPFA | QNAM=MHEVDTYP and QVAL=SYMPTOM ONSET in SUPPMH | QNAM=MHEVDTYP and QVAL=DIAGNOSIS in SUPPMH | QNAM=OTHEXMN in SUPPFA | QNAM=OTHDSLOC in SUPPFA | QNAM=BODSYSOT in SUPPPE | QNAM=LBSUCAT in SUPPLB when LBSTAT^=NOT DONE | QNAM=ECACN in SUPPEC | QNAM=AERELPR in SUPPAE | QNAM=HYREACFL in SUPPAE | QNAM=AESI in SUPPAE | QNAM=OTHFL in SUPPAE | QNAM=MALIGFL in SUPPAE | QNAM=PMLFL in SUPPAE | QNAM=INFECTFL in SUPPAE | QNAM=AEHOSPDT in SUPPAE | QNAM=AEDISCDT in SUPPAE | QNAM=CMINDAE1 in SUPPCM | QNAM=CMINDAE2 in SUPPCM | QNAM=CMINDAE3 in SUPPCM | QNAM=CMINDMH1 in SUPPCM | QNAM=CMINDMH2 in SUPPCM | QNAM=CMINDMH3 in SUPPCM | QNAM=SVOCCUR in SUPPSV; N when No Visit; Y when the others selected. | QNAM=MISSASMT in SUPPSV; Y when Visit with Missed Assessments | QNAM=SVREASOC in SUPPSV | QNAM=SVREASOC in SUPPSV when Other | QNAM=EVLDTL in SUPPEC | QNAM=EVLDTL in SUPPEC when Other | QNAM=STDYST_1 in SUPPDM | QNAM=STDYSTYN in SUPPDM
+Variable,QNAM=ADSDECOD,17,1,standard_variable,QNAM=ADSDECOD
+Variable,QNAM=AEDISCDT,51,1,standard_variable,QNAM=AEDISCDT
+Variable,QNAM=AEHOSPDT,51,1,standard_variable,QNAM=AEHOSPDT
+Variable,QNAM=AERELPR,49,1,standard_variable,QNAM=AERELPR
+Variable,QNAM=AESI,49,1,standard_variable,QNAM=AESI
+Variable,QNAM=BODSYSOT,34,1,standard_variable,QNAM=BODSYSOT
+Variable,QNAM=CMINDAE1,55,1,standard_variable,QNAM=CMINDAE1
+Variable,QNAM=CMINDAE2,55,1,standard_variable,QNAM=CMINDAE2
+Variable,QNAM=CMINDAE3,55,1,standard_variable,QNAM=CMINDAE3
+Variable,QNAM=CMINDMH1,55,1,standard_variable,QNAM=CMINDMH1
+Variable,QNAM=CMINDMH2,55,1,standard_variable,QNAM=CMINDMH2
+Variable,QNAM=CMINDMH3,55,1,standard_variable,QNAM=CMINDMH3
+Variable,QNAM=ECACN,46,1,standard_variable,QNAM=ECACN
+Variable,QNAM=EVLDTL,61,1,standard_variable,QNAM=EVLDTL
+Variable,QNAM=HYREACFL,49,1,standard_variable,QNAM=HYREACFL
+Variable,QNAM=INFECTFL,50,1,standard_variable,QNAM=INFECTFL
+Variable,QNAM=LBSUCAT,44,1,standard_variable,QNAM=LBSUCAT
+Variable,QNAM=MALIGFL,50,1,standard_variable,QNAM=MALIGFL
+Variable,QNAM=MISSASMT,60,1,standard_variable,QNAM=MISSASMT
+Variable,QNAM=OTHDSLOC,21,1,standard_variable,QNAM=OTHDSLOC
+Variable,QNAM=OTHEXMN,"19,22",2,standard_variable,QNAM=OTHEXMN
+Variable,QNAM=OTHFL,50,1,standard_variable,QNAM=OTHFL
+Variable,QNAM=OTHLOC,18,1,standard_variable,QNAM=OTHLOC
+Variable,QNAM=PMLFL,50,1,standard_variable,QNAM=PMLFL
+Variable,QNAM=PROTVRSN,14,1,standard_variable,QNAM=PROTVRSN
+Variable,QNAM=RACEASN,13,1,standard_variable,QNAM=RACEASN
+Variable,QNAM=RACESASN,13,1,standard_variable,QNAM=RACESASN
+Variable,QNAM=SCR1STNO,17,1,standard_variable,QNAM=SCR1STNO
+Variable,QNAM=SCR1STST,17,1,standard_variable,QNAM=SCR1STST
+Variable,QNAM=SCRSTD,17,1,standard_variable,QNAM=SCRSTD
+Variable,QNAM=STDYSTYN,64,1,standard_variable,QNAM=STDYSTYN
+Variable,QNAM=SVOCCUR,60,1,standard_variable,QNAM=SVOCCUR
+Variable,QNAM=SVREASOC,60,1,standard_variable,QNAM=SVREASOC
+Variable,QSCAT,40,1,standard_variable,QSCAT=IBDQ
+Variable,QSCAT=IBDQ,40,1,standard_variable,QSCAT=IBDQ
+Variable,QSDTC,40,1,standard_variable,QSDTC
+Variable,QSREASND,40,1,standard_variable,QSREASND
+Variable,QSSTAT,40,1,standard_variable,QSSTAT=NOT DONE when QSTESTCD=QSALL
+Variable,QSSTAT=NOT DONE,40,1,standard_variable,QSSTAT=NOT DONE
+Variable,QSTESTCD,40,1,standard_variable,QSSTAT=NOT DONE when QSTESTCD=QSALL
+Variable,QSTESTCD=QSALL,40,1,standard_variable,QSTESTCD=QSALL
+Variable,QVAL,"18,21",2,standard_variable,QNAM=MHEVDTYP and QVAL=SYMPTOM ONSET in SUPPMH | QNAM=MHEVDTYP and QVAL=DIAGNOSIS in SUPPMH
+Variable,QVAL=DIAGNOSIS,"18,21",2,standard_variable,QVAL=DIAGNOSIS
+Variable,QVAL=SYMPTOM ONSET,"18,21",2,standard_variable,QVAL=SYMPTOM ONSET
+Variable,RACE,13,1,standard_variable,RACE | QNAM=RACEASN in SUPPDM when RACE=MULTIPLE | QNAM=RACEASN in SUPPXM when RACE=MULTIPLE
+Variable,RACE=MULTIPLE,13,1,standard_variable,RACE=MULTIPLE
+Variable,RACEASN,13,1,standard_variable,QNAM=RACEASN in SUPPDM when RACE=MULTIPLE | QNAM=RACEASN in SUPPXM when RACE=MULTIPLE
+Variable,RACESASN,13,1,standard_variable,QNAM=RACESASN in SUPPDM | QNAM=RACESASN in SUPPXM
+Variable,RFICDTC,14,1,standard_variable,RFICDTC
+Variable,RSCAT,"41,42,43",3,standard_variable,RSCAT=MAYO SCORE | RSCAT=CDAI V1
+Variable,RSCAT=CDAI V1,42,1,standard_variable,RSCAT=CDAI V1
+Variable,RSCAT=MAYO SCORE,"41,43",2,standard_variable,RSCAT=MAYO SCORE
+Variable,RSDTC,"41,42,43",3,standard_variable,RSDTC
+Variable,RSREASND,"42,43",2,standard_variable,RSREASND
+Variable,RSSCAT,41,1,standard_variable,RSSCAT=ENDOSCOPY
+Variable,RSSCAT=ENDOSCOPY,41,1,standard_variable,RSSCAT=ENDOSCOPY
+Variable,RSSTAT,"41,42,43",3,standard_variable,RSSTAT=NOT DONE when RSTESTCD=RSALL
+Variable,RSSTAT=NOT DONE,"41,42,43",3,standard_variable,RSSTAT=NOT DONE
+Variable,RSTESTCD,"41,42,43",3,standard_variable,RSSTAT=NOT DONE when RSTESTCD=RSALL
+Variable,RSTESTCD=RSALL,"41,42,43",3,standard_variable,RSTESTCD=RSALL
+Variable,SCR1STNO,17,1,standard_variable,QNAM=SCR1STNO in SUPPDS
+Variable,SCR1STST,17,1,standard_variable,QNAM=SCR1STST in SUPPDS
+Variable,SCRSTD,17,1,standard_variable,QNAM=SCRSTD in SUPPDS
+Variable,SEX,"10,13",2,standard_variable,SEX
+Variable,SITEID,10,1,standard_variable,SITEID
+Variable,STDYSTYN,64,1,standard_variable,QNAM=STDYSTYN in SUPPDM
+Variable,SUBJID,10,1,standard_variable,SUBJID
+Variable,SUCAT,15,1,standard_variable,SUCAT=TOBACCO
+Variable,SUCAT=TOBACCO,15,1,standard_variable,SUCAT=TOBACCO
+Variable,SUENRTRT,15,1,standard_variable,"SUOCCUR=N when Never is selected;SUOCCUR=Y when Former or Current is selected;SUSTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT when Former or Current is selected; SUENRTRT=BEFORE and SUSTTPT=INFORMED CONSENT when Former is selected."
+Variable,SUNCF,15,1,standard_variable,SUNCF in SUPPSU
+Variable,SUOCCUR,15,1,standard_variable,"SUOCCUR=N when Never is selected;SUOCCUR=Y when Former or Current is selected;SUSTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT when Former or Current is selected; SUENRTRT=BEFORE and SUSTTPT=INFORMED CONSENT when Former is selected."
+Variable,SUOCCUR=N,15,1,standard_variable,SUOCCUR=N
+Variable,SUOCCUR=Y,15,1,standard_variable,SUOCCUR=Y
+Variable,SUPPPE,34,1,standard_variable,QNAM=BODSYSOT in SUPPPE
+Variable,SUSTRTPT,15,1,standard_variable,"SUOCCUR=N when Never is selected;SUOCCUR=Y when Former or Current is selected;SUSTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT when Former or Current is selected; SUENRTRT=BEFORE and SUSTTPT=INFORMED CONSENT when Former is selected."
+Variable,SUSTTPT,15,1,standard_variable,"SUOCCUR=N when Never is selected;SUOCCUR=Y when Former or Current is selected;SUSTRTPT=BEFORE and SUSTTPT=INFORMED CONSENT when Former or Current is selected; SUENRTRT=BEFORE and SUSTTPT=INFORMED CONSENT when Former is selected."
+Variable,SUSTTPT=INFORMED CONSENT,15,1,standard_variable,SUSTTPT=INFORMED CONSENT
+Variable,SUTRT,15,1,standard_variable,SUTRT
+Variable,SVENDTC,"11,12",2,standard_variable,SVSTDTC/SVENDTC
+Variable,SVMETHOD,"60,61",2,standard_variable,SVMETHOD | SVMETHOD when Other
+Variable,SVOCCUR,60,1,standard_variable,QNAM=SVOCCUR in SUPPSV; N when No Visit; Y when the others selected.
+Variable,SVREASOC,60,1,standard_variable,QNAM=SVREASOC in SUPPSV | QNAM=SVREASOC in SUPPSV when Other
+Variable,SVSTDTC,"11,12,60",3,standard_variable,SVSTDTC/SVENDTC | SVSTDTC when Type of Visit = Unscheduled
+Variable,SVUPDES,"12,61",2,standard_variable,SVUPDES
+Variable,VISIT,"59,60",2,standard_variable,VISIT
+Variable,VSDTC,"35,36",2,standard_variable,VSDTC
+Variable,VSLOC,"36,37,38,39",4,standard_variable,VSLOC
+Variable,VSORRES,"35,36,37,38,39",5,standard_variable,VSORRES/VSORRESU when VSTESTCD=WEIGHT is selected | VSORRES/VSORRESU when VSTESTCD=HEIGHT is selected | VSORRES/VSORRESU when VSTESTCD=TEMP | VSORRES/VSORRESU when VSTESTCD=RESP | VSORRES/VSORRESU when VSTESTCD=SYSBP | VSORRES/VSORRESU when VSTESTCD=DIABP | VSORRES/VSORRESU when VSTESTCD=PULSE
+Variable,VSORRESU,"35,36,37,38,39",5,standard_variable,VSORRES/VSORRESU when VSTESTCD=WEIGHT is selected | VSORRES/VSORRESU when VSTESTCD=HEIGHT is selected | VSORRES/VSORRESU when VSTESTCD=TEMP | VSORRES/VSORRESU when VSTESTCD=RESP | VSORRES/VSORRESU when VSTESTCD=SYSBP | VSORRES/VSORRESU when VSTESTCD=DIABP | VSORRES/VSORRESU when VSTESTCD=PULSE
+Variable,VSPOS,"36,37,38",3,standard_variable,VSPOS
+Variable,VSTESTCD,"35,36,37,38,39",5,standard_variable,VSTESTCD=WEIGHT | VSORRES/VSORRESU when VSTESTCD=WEIGHT is selected | VSORRES/VSORRESU when VSTESTCD=HEIGHT is selected | VSTESTCD=HEIGHT | VSTESTCD=TEMP | VSORRES/VSORRESU when VSTESTCD=TEMP | VSTESTCD=RESP | VSORRES/VSORRESU when VSTESTCD=RESP | VSTESTCD=SYSBP | VSORRES/VSORRESU when VSTESTCD=SYSBP | VSTESTCD=DIABP | VSORRES/VSORRESU when VSTESTCD=DIABP | VSTESTCD=PULSE | VSORRES/VSORRESU when VSTESTCD=PULSE
+Variable,VSTESTCD=DIABP,38,1,standard_variable,VSTESTCD=DIABP
+Variable,VSTESTCD=HEIGHT,35,1,standard_variable,VSTESTCD=HEIGHT
+Variable,VSTESTCD=PULSE,"38,39",2,standard_variable,VSTESTCD=PULSE
+Variable,VSTESTCD=RESP,"36,37",2,standard_variable,VSTESTCD=RESP
+Variable,VSTESTCD=SYSBP,37,1,standard_variable,VSTESTCD=SYSBP
+Variable,VSTESTCD=TEMP,36,1,standard_variable,VSTESTCD=TEMP
+Variable,VSTESTCD=WEIGHT,35,1,standard_variable,VSTESTCD=WEIGHT
+NOT SUBMITTED,NOT SUBMITTED,"10,11,13,13,16,17,17,24,26,30,30,31,31,32,32,32,33,33,34,40,41,42,43,46,46,48,49,51,51,52,57,58,60,60,61,61",36,not_submitted,

@@ -34,6 +34,7 @@ except ImportError:
 
 # Local stopwords (same as PyMuPDF)
 DEFAULT_STOPWORDS = {"AND", "OR", "IF", "THEN", "THE", "A", "IN", "ON", "FOR", "WITH", "IS", "ARE", "TO", "BY", "OF", "NOTE"}
+OCR_SHORT_TOKEN_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789=/._-"
 
 
 def resolve_tesseract_cmd() -> str:
@@ -153,6 +154,36 @@ def _passes_annotation_text_gate(text: str, score: float, min_score: float = 1.5
         return True
     if len(upper_tokens) == 1 and lowercase_ratio <= 0.2 and len(normalized) <= 14:
         return True
+    return False
+
+
+def _has_strong_unknown_signal(token: str, raw_context: str) -> bool:
+    """
+    Return True when an unknown token has strong structural evidence.
+
+    This reduces noisy OCR uppercase tokens while keeping potentially useful unknowns.
+    """
+    upper_token = (token or "").upper().strip()
+    if not upper_token:
+        return False
+
+    context_upper = (raw_context or "").upper()
+    escaped = re.escape(upper_token)
+
+    if re.search(rf"\b{escaped}\s*=", context_upper):
+        return True
+    if re.search(rf"\b{escaped}\s*[:;,]", context_upper):
+        return True
+    if re.search(rf"\b{escaped}\s+(?:WHEN|IF|THEN)\b", context_upper):
+        return True
+    if re.search(rf"\b{escaped}\s*\(", context_upper):
+        return True
+
+    # Keep short isolated annotation tokens (e.g., standalone box text).
+    if re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", upper_token):
+        words = context_upper.split()
+        if len(words) <= 2:
+            return True
     return False
 
 
@@ -303,7 +334,11 @@ def _guess_contextual_token_fix(
     return token
 
 
-def _repair_annotation_text(text: str, standard_variable_terms: Set[str]) -> str:
+def _repair_annotation_text(
+    text: str,
+    standard_variable_terms: Set[str],
+    standard_dataset_terms: Set[str] = None,
+) -> str:
     """
     Repair common OCR artifacts that drop/split variable names around "=".
 
@@ -317,6 +352,26 @@ def _repair_annotation_text(text: str, standard_variable_terms: Set[str]) -> str
         return normalized
 
     repaired = normalized
+    standard_dataset_terms = standard_dataset_terms or set()
+    known_terms = set(standard_variable_terms) | set(standard_dataset_terms)
+
+    # Merge accidental uppercase token splits when the merged token is a known SDTM term.
+    split_token_pattern = re.compile(r"\b([A-Z][A-Z0-9]{0,3})\s+([A-Z0-9]{1,7})\b")
+    for _ in range(2):
+        before = repaired
+
+        def merge_split_token(match: re.Match) -> str:
+            left = match.group(1).upper()
+            right = match.group(2).upper()
+            merged = f"{left}{right}"
+            if len(merged) <= 8 and merged in known_terms:
+                return merged
+            return match.group(0)
+
+        repaired = split_token_pattern.sub(merge_split_token, repaired)
+        if repaired == before:
+            break
+
     has_supp_context = bool(re.search(r"\bSUPP[A-Z]{2,8}\b", repaired, re.IGNORECASE))
 
     if has_supp_context:
@@ -602,6 +657,9 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
                 continue
             if rect_area > page_area * 0.18:
                 continue
+            if w <= 26 and h <= 26 and area < 320:
+                # Most tiny near-square contours are checkbox markers, not annotation text boxes.
+                continue
 
             aspect_ratio = max(w, h) / min(w, h)
             if aspect_ratio > 35:
@@ -667,7 +725,7 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
             detected_boxes.append(candidate)
 
         # Guardrail for OCR cost on noisy pages.
-        max_boxes_per_page = 28
+        max_boxes_per_page = 36
         if len(detected_boxes) > max_boxes_per_page:
             detected_boxes = detected_boxes[:max_boxes_per_page]
 
@@ -714,10 +772,11 @@ def extract_text_ocr(
         standard_dataset_terms = standard_dataset_terms or set()
         x, y, w, h = rect
 
-        # Shrink ROI first to avoid pulling neighboring text while preserving leading glyphs.
-        inset_x = max(0, int(w * 0.02))
-        inset_y = max(1, int(h * 0.08))
-        if (w - 2 * inset_x) >= 12 and (h - 2 * inset_y) >= 8:
+        # Shrink ROI first to avoid neighboring body text.
+        # Keep horizontal shrink minimal to avoid dropping leading characters.
+        inset_x = max(0, int(w * 0.005))
+        inset_y = max(0, int(h * 0.06))
+        if (w - 2 * inset_x) >= 10 and (h - 2 * inset_y) >= 8:
             x += inset_x
             y += inset_y
             w -= 2 * inset_x
@@ -741,36 +800,52 @@ def extract_text_ocr(
         else:
             gray = region
 
-        variants: List[np.ndarray] = [gray]
+        tiny_roi = w < 70 or h < 24
+        ocr_gray = gray
+        if tiny_roi:
+            ocr_gray = cv2.resize(gray, None, fx=1.45, fy=1.45, interpolation=cv2.INTER_CUBIC)
 
-        _, binary_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        variants: List[np.ndarray] = [ocr_gray]
+
+        _, binary_otsu = cv2.threshold(ocr_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         variants.append(cv2.dilate(binary_otsu, kernel, iterations=1))
 
         # Adaptive threshold is helpful but relatively expensive; use as fallback only.
-        tiny_roi = w < 70 or h < 24
-        primary_config = r"--psm 7 --oem 3" if tiny_roi else r"--psm 6 --oem 3"
+        if tiny_roi:
+            quick_configs = [
+                r"--psm 7 --oem 3",
+                rf"--psm 8 --oem 3 -c tessedit_char_whitelist={OCR_SHORT_TOKEN_WHITELIST}",
+                rf"--psm 13 --oem 3 -c tessedit_char_whitelist={OCR_SHORT_TOKEN_WHITELIST}",
+            ]
+        else:
+            quick_configs = [
+                r"--psm 6 --oem 3",
+                r"--psm 7 --oem 3",
+            ]
+        primary_config = quick_configs[0]
 
         quick_candidates = []
         for processed in variants:
-            try:
-                quick_text = _quick_ocr_text(processed, language, primary_config)
-            except Exception:
-                continue
-            if not quick_text:
-                continue
-            quick_score = _score_annotation_text(quick_text)
-            quick_candidates.append({
-                "text": quick_text,
-                "score": quick_score,
-                "image": processed,
-                "config": primary_config,
-            })
+            for config in quick_configs:
+                try:
+                    quick_text = _quick_ocr_text(processed, language, config)
+                except Exception:
+                    continue
+                if not quick_text:
+                    continue
+                quick_score = _score_annotation_text(quick_text)
+                quick_candidates.append({
+                    "text": quick_text,
+                    "score": quick_score,
+                    "image": processed,
+                    "config": config,
+                })
 
         if not quick_candidates:
             try:
                 binary_adaptive = cv2.adaptiveThreshold(
-                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+                    ocr_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
                 )
                 processed = cv2.dilate(binary_adaptive, kernel, iterations=1)
                 quick_text = _quick_ocr_text(processed, language, primary_config)
@@ -1052,9 +1127,15 @@ def parse_supp_variable(text: str) -> List[Tuple[str, str]]:
         results.append(key)
 
     # Pattern 0: "QNAM=AEHOSPDT in SUPPAE" -> capture (QNAM, SUPPAE)
-    pattern0 = r'([A-Z][A-Z0-9]{1,7})\s*=\s*[A-Z0-9][A-Z0-9\s/\-]{0,80}?\s+in\s+(SUPP[A-Z]{2,8})\b'
+    pattern0 = r'([A-Z][A-Z0-9]{1,7})\s*=\s*([A-Z0-9][A-Z0-9\s/\-]{0,80}?)\s+in\s+(SUPP[A-Z]{2,8})\b'
     for match in re.finditer(pattern0, text, re.IGNORECASE):
-        add_pair(match.group(1), match.group(2))
+        lhs = match.group(1)
+        value = re.sub(r'\s{2,}', ' ', (match.group(2) or '').strip()).upper()
+        dataset = match.group(3)
+        add_pair(lhs, dataset)
+        # SUPP records commonly encode variable names in QNAM=VALUE.
+        if lhs.upper() == "QNAM" and re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", value):
+            add_pair(value, dataset)
 
     # Pattern 1: "VAR in SUPPYY" or "VAR in SUPPxx"
     # Negative lookbehind avoids matching value side in "QNAM=OTHLOC in SUPPFA".
@@ -1263,7 +1344,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 ocr_text = extract_text_ocr(
                     page_image,
                     rect,
-                    margin=1,
+                    margin=2,
                     standard_variable_terms=standard_terms.get("variable", set()),
                     standard_dataset_terms=standard_terms.get("dataset", set()),
                 )
@@ -1275,6 +1356,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 repaired_text = _repair_annotation_text(
                     ocr_text,
                     standard_terms.get("variable", set()),
+                    standard_terms.get("dataset", set()),
                 )
                 if repaired_text:
                     first_score = _score_annotation_text(ocr_text) + _ocr_quality_adjustment(
@@ -1295,7 +1377,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 else:
                     ocr_text_score = _score_annotation_text(ocr_text)
 
-                if not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.5):
+                if not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.8):
                     debug_info["ocr_noise_rejected_count"] += 1
                     continue
 
@@ -1317,11 +1399,26 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 # Extract VARIABLE=VALUE pairs
                 value_pairs = extract_variable_value_pairs(ocr_text)
                 for left_var, _, pair_text in value_pairs:
+                    normalized_left = left_var
+                    if normalized_left not in standard_terms.get("variable", set()):
+                        nearby_left = _find_unique_nearby_standard_term(
+                            normalized_left,
+                            standard_terms.get("variable", set()),
+                        )
+                        if nearby_left:
+                            normalized_left = nearby_left
+                            pair_text = re.sub(
+                                rf"^{re.escape(left_var)}=",
+                                f"{normalized_left}=",
+                                pair_text,
+                                flags=re.IGNORECASE,
+                            )
+
                     category, match_level = classify_term(
-                        left_var, ocr_text, standard_terms,
+                        normalized_left, ocr_text, standard_terms,
                         suffix_prefix_patterns, blacklist
                     )
-                    if left_var in standard_terms.get("dataset", set()) and category != "not_submitted":
+                    if normalized_left in standard_terms.get("dataset", set()) and category != "not_submitted":
                         category = "dataset_name"
                         if match_level == "none":
                             match_level = "exact"
@@ -1356,6 +1453,14 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                         continue
 
                     upper_cand = candidate.upper()
+                    if upper_cand not in standard_terms.get("variable", set()):
+                        nearby_cand = _find_unique_nearby_standard_term(
+                            upper_cand,
+                            standard_terms.get("variable", set()),
+                        )
+                        if nearby_cand:
+                            upper_cand = nearby_cand
+
                     category, match_level = classify_term(
                         upper_cand, ocr_text, standard_terms,
                         suffix_prefix_patterns, blacklist
@@ -1368,9 +1473,41 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                             match_level = "exact"
                         # Track domain annotations
                         domain_index[upper_cand].add(page_idx)
+                    elif category == "dataset_name" and upper_cand not in standard_terms.get("dataset", set()):
+                        context_upper = (ocr_text or "").upper()
+                        if not (
+                            upper_cand.startswith("SUPP")
+                            or re.search(rf"\b{re.escape(upper_cand)}\s*(?:=|\()", context_upper)
+                        ):
+                            category = "unknown"
+                            match_level = "none"
 
                     # Skip blacklist items
                     if category == "blacklist":
+                        continue
+
+                    if category == "unknown" and not _has_strong_unknown_signal(upper_cand, ocr_text):
+                        continue
+                    if (
+                        category == "standard_variable"
+                        and len(upper_cand) <= 3
+                        and upper_cand not in standard_terms.get("dataset", set())
+                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
+                    ):
+                        continue
+                    if (
+                        match_level == "suffix_prefix"
+                        and len(upper_cand) <= 2
+                        and upper_cand not in standard_terms.get("dataset", set())
+                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
+                    ):
+                        continue
+                    if (
+                        category == "dataset_name"
+                        and len(upper_cand) <= 2
+                        and upper_cand not in standard_terms.get("dataset", set())
+                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
+                    ):
                         continue
 
                     # Record this occurrence
