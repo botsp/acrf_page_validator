@@ -1,5 +1,12 @@
-import streamlit as st
+import sys
 from pathlib import Path
+
+# Ensure the project root is in the Python path
+project_root = Path(__file__).parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+import streamlit as st
 from modules.xml_parser import parse_define_xml
 from modules.comparator import compare_xml_vs_pymupdf, rows_to_csv_bytes
 
