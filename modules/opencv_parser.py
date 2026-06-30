@@ -9,7 +9,7 @@ This module provides image-based extraction for:
 Strategy:
 - Convert PDF pages to images using PyMuPDF rendering
 - Detect colored/bordered boxes using contour analysis
-- Extract text via Tesseract OCR
+- Extract text via Tesseract OCR, then low-confidence EasyOCR / TrOCR fallback
 - Classify results using same priority rules as PyMuPDF
 
 Output format: Identical to PyMuPDF extract_variables_from_pdf()
@@ -35,6 +35,12 @@ except ImportError:
 # Local stopwords (same as PyMuPDF)
 DEFAULT_STOPWORDS = {"AND", "OR", "IF", "THEN", "THE", "A", "IN", "ON", "FOR", "WITH", "IS", "ARE", "TO", "BY", "OF", "NOTE"}
 OCR_SHORT_TOKEN_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789=/._-"
+ENABLE_TROCR = os.environ.get("ACRF_ENABLE_TROCR", "").strip().lower() in {"1", "true", "yes", "on"}
+_EASYOCR_READER = None
+_EASYOCR_INIT_ERROR = ""
+_TROCR_PROCESSOR = None
+_TROCR_MODEL = None
+_TROCR_INIT_ERROR = ""
 
 
 def resolve_tesseract_cmd() -> str:
@@ -66,6 +72,161 @@ def is_tesseract_available() -> Tuple[bool, str]:
         return True, ""
     except Exception as exc:
         return False, str(exc)
+
+
+def _get_easyocr_reader() -> Tuple[Any, str]:
+    """Lazily initialize EasyOCR reader for low-confidence OCR fallback."""
+    global _EASYOCR_READER, _EASYOCR_INIT_ERROR
+
+    if _EASYOCR_READER is not None:
+        return _EASYOCR_READER, ""
+    if _EASYOCR_INIT_ERROR:
+        return None, _EASYOCR_INIT_ERROR
+
+    try:
+        import easyocr  # type: ignore
+        _EASYOCR_READER = easyocr.Reader(["en"], gpu=False, verbose=False)
+        return _EASYOCR_READER, ""
+    except Exception as exc:
+        _EASYOCR_INIT_ERROR = str(exc)
+        return None, _EASYOCR_INIT_ERROR
+
+
+def extract_text_easyocr(
+    page_image: np.ndarray,
+    rect: Tuple[int, int, int, int],
+    reader: Any,
+    margin: int = 2,
+) -> Tuple[str, float]:
+    """
+    Extract text from a region via EasyOCR and return (text, mean_confidence).
+    """
+    if reader is None:
+        return "", 0.0
+
+    try:
+        x, y, w, h = rect
+
+        inset_x = max(0, int(w * 0.005))
+        inset_y = max(0, int(h * 0.06))
+        if (w - 2 * inset_x) >= 10 and (h - 2 * inset_y) >= 8:
+            x += inset_x
+            y += inset_y
+            w -= 2 * inset_x
+            h -= 2 * inset_y
+
+        x1 = max(0, x - margin)
+        y1 = max(0, y - margin)
+        x2 = min(page_image.shape[1], x + w + margin)
+        y2 = min(page_image.shape[0], y + h + margin)
+        roi = page_image[y1:y2, x1:x2]
+        if roi.size == 0:
+            return "", 0.0
+
+        if w < 70 or h < 24:
+            roi = cv2.resize(roi, None, fx=1.45, fy=1.45, interpolation=cv2.INTER_CUBIC)
+
+        results = reader.readtext(roi, detail=1, paragraph=False)
+        texts: List[str] = []
+        confs: List[float] = []
+        for item in results:
+            if not isinstance(item, (list, tuple)) or len(item) < 3:
+                continue
+            token = _normalize_ocr_text(str(item[1]))
+            if not token:
+                continue
+            texts.append(token)
+            try:
+                conf = float(item[2])
+                if conf >= 0:
+                    confs.append(conf)
+            except (TypeError, ValueError):
+                pass
+
+        merged_text = _normalize_ocr_text(" ".join(texts))
+        mean_conf = round(sum(confs) / len(confs), 3) if confs else 0.0
+        return merged_text, mean_conf
+    except Exception:
+        return "", 0.0
+
+
+def _get_trocr_engine() -> Tuple[Any, Any, str]:
+    """Lazily initialize TrOCR components for stronger OCR fallback."""
+    global _TROCR_PROCESSOR, _TROCR_MODEL, _TROCR_INIT_ERROR
+
+    if _TROCR_PROCESSOR is not None and _TROCR_MODEL is not None:
+        return _TROCR_PROCESSOR, _TROCR_MODEL, ""
+    if _TROCR_INIT_ERROR:
+        return None, None, _TROCR_INIT_ERROR
+
+    try:
+        import torch  # type: ignore
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel  # type: ignore
+
+        _TROCR_PROCESSOR = TrOCRProcessor.from_pretrained("microsoft/trocr-small-printed")
+        _TROCR_MODEL = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-small-printed")
+        _TROCR_MODEL.eval()
+        if torch.cuda.is_available():
+            _TROCR_MODEL.to("cuda")
+        return _TROCR_PROCESSOR, _TROCR_MODEL, ""
+    except Exception as exc:
+        _TROCR_INIT_ERROR = str(exc)
+        return None, None, _TROCR_INIT_ERROR
+
+
+def extract_text_trocr(
+    page_image: np.ndarray,
+    rect: Tuple[int, int, int, int],
+    processor: Any,
+    model: Any,
+    margin: int = 2,
+) -> str:
+    """
+    Extract text from a region via TrOCR and return normalized text.
+    """
+    if processor is None or model is None:
+        return ""
+
+    try:
+        import torch  # type: ignore
+
+        x, y, w, h = rect
+        inset_x = max(0, int(w * 0.005))
+        inset_y = max(0, int(h * 0.06))
+        if (w - 2 * inset_x) >= 10 and (h - 2 * inset_y) >= 8:
+            x += inset_x
+            y += inset_y
+            w -= 2 * inset_x
+            h -= 2 * inset_y
+
+        x1 = max(0, x - margin)
+        y1 = max(0, y - margin)
+        x2 = min(page_image.shape[1], x + w + margin)
+        y2 = min(page_image.shape[0], y + h + margin)
+        roi = page_image[y1:y2, x1:x2]
+        if roi.size == 0:
+            return ""
+
+        if w < 95 or h < 30:
+            roi = cv2.resize(roi, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
+
+        roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        inputs = processor(images=roi_rgb, return_tensors="pt")
+        pixel_values = inputs.pixel_values
+        if next(model.parameters()).is_cuda:
+            pixel_values = pixel_values.to("cuda")
+
+        with torch.no_grad():
+            generated_ids = model.generate(
+                pixel_values,
+                max_new_tokens=24,
+                num_beams=2,
+                early_stopping=True,
+            )
+        text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        return _normalize_ocr_text(text)
+    except Exception:
+        return ""
 
 
 def _compute_rect_iou(rect_a: Tuple[int, int, int, int], rect_b: Tuple[int, int, int, int]) -> float:
@@ -640,46 +801,50 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
         color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
 
         contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        edge_mask = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+        edge_mask = cv2.morphologyEx(
+            edge_mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3)),
+            iterations=1,
+        )
+        edge_contours, _ = cv2.findContours(edge_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         page_area = page_image.shape[0] * page_image.shape[1]
         candidate_boxes: List[Dict[str, Any]] = []
 
-        for contour in contours:
+        def evaluate_contour(contour: np.ndarray, source: str) -> Dict[str, Any]:
             area = cv2.contourArea(contour)
             if area < max(min_box_area, 120):
-                continue
+                return {}
 
             x, y, w, h = cv2.boundingRect(contour)
             rect_area = w * h
 
             if w < 24 or h < 10:
-                continue
+                return {}
             if rect_area <= 0:
-                continue
+                return {}
             if rect_area > page_area * 0.18:
-                continue
+                return {}
             if w <= 26 and h <= 26 and area < 320:
                 # Most tiny near-square contours are checkbox markers, not annotation text boxes.
-                continue
+                return {}
 
             aspect_ratio = max(w, h) / min(w, h)
             if aspect_ratio > 35:
-                continue
+                return {}
 
             fill_ratio = area / rect_area
-            if fill_ratio < 0.35:
-                continue
 
             perimeter = cv2.arcLength(contour, True)
             if perimeter <= 0:
-                continue
+                return {}
             approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
             if len(approx) > 10:
-                continue
+                return {}
 
             roi_mask = color_mask[y:y + h, x:x + w]
             colored_ratio = cv2.countNonZero(roi_mask) / rect_area
-            if colored_ratio < 0.40:
-                continue
 
             # Border evidence from edge density in a thin border band.
             band = np.zeros((h, w), dtype=np.uint8)
@@ -690,29 +855,70 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
             edge_band_pixels = cv2.countNonZero(cv2.bitwise_and(roi_edges, band))
             border_density = (edge_band_pixels / band_pixels) if band_pixels > 0 else 0.0
 
-            confidence = (
-                0.50 * colored_ratio
-                + 0.35 * fill_ratio
-                + 0.15 * min(border_density * 8.0, 1.0)
-            )
-            if confidence < 0.42:
-                continue
-
-            if border_density >= 0.12:
-                detection_type = "solid_border"
-            elif border_density >= 0.05:
-                detection_type = "dashed_border"
+            inner_margin = max(1, min(w, h) // 7)
+            inner_x1 = x + inner_margin
+            inner_y1 = y + inner_margin
+            inner_x2 = x + w - inner_margin
+            inner_y2 = y + h - inner_margin
+            if inner_x2 > inner_x1 and inner_y2 > inner_y1:
+                inner_gray = gray[inner_y1:inner_y2, inner_x1:inner_x2]
+                inner_dark_ratio = float(np.mean(inner_gray < 205)) if inner_gray.size else 0.0
             else:
-                detection_type = "colored_bg"
+                inner_gray = gray[y:y + h, x:x + w]
+                inner_dark_ratio = float(np.mean(inner_gray < 205)) if inner_gray.size else 0.0
 
-            candidate_boxes.append({
+            if source == "color":
+                if fill_ratio < 0.35 or colored_ratio < 0.40:
+                    return {}
+                confidence = (
+                    0.50 * colored_ratio
+                    + 0.35 * fill_ratio
+                    + 0.15 * min(border_density * 8.0, 1.0)
+                )
+                if confidence < 0.42:
+                    return {}
+                if border_density >= 0.12:
+                    detection_type = "solid_border"
+                elif border_density >= 0.05:
+                    detection_type = "dashed_border"
+                else:
+                    detection_type = "colored_bg"
+            else:
+                # Border-first path to recover unfilled solid/dashed annotation boxes.
+                if border_density < 0.08 or fill_ratio < 0.08 or inner_dark_ratio < 0.015:
+                    return {}
+                confidence = (
+                    0.65 * min(border_density * 6.0, 1.0)
+                    + 0.20 * min(fill_ratio * 1.8, 1.0)
+                    + 0.15 * min(inner_dark_ratio * 10.0, 1.0)
+                )
+                if confidence < 0.34:
+                    return {}
+                detection_type = "border_only" if border_density >= 0.12 else "dashed_border"
+
+            return {
                 "rect": (x, y, w, h),
                 "confidence": min(1.0, float(round(confidence, 3))),
                 "type": detection_type,
                 "fill_ratio": round(fill_ratio, 3),
                 "colored_ratio": round(colored_ratio, 3),
                 "border_density": round(border_density, 3),
-            })
+            }
+
+        color_candidates: List[Dict[str, Any]] = []
+        for contour in contours:
+            candidate = evaluate_contour(contour, "color")
+            if candidate:
+                color_candidates.append(candidate)
+        candidate_boxes.extend(color_candidates)
+
+        # Border-only recovery is expensive; run it only when color-driven recall is limited.
+        if len(color_candidates) < 22:
+            edge_contours = sorted(edge_contours, key=cv2.contourArea, reverse=True)[:180]
+            for contour in edge_contours:
+                candidate = evaluate_contour(contour, "border")
+                if candidate:
+                    candidate_boxes.append(candidate)
 
         # Deduplicate by IoU (keep higher-confidence boxes).
         candidate_boxes.sort(key=lambda item: item["confidence"], reverse=True)
@@ -725,7 +931,8 @@ def detect_annotations_opencv(page_image: np.ndarray, min_box_area: int = 50) ->
             detected_boxes.append(candidate)
 
         # Guardrail for OCR cost on noisy pages.
-        max_boxes_per_page = 36
+        # Raised to improve recall on dense flattened pages.
+        max_boxes_per_page = 38
         if len(detected_boxes) > max_boxes_per_page:
             detected_boxes = detected_boxes[:max_boxes_per_page]
 
@@ -1277,6 +1484,14 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
         standard_terms = CONFIG.get("standard_terms", {"variable": set(), "dataset": set()})
         suffix_prefix_patterns = CONFIG.get("suffix_prefix_patterns", {"variable": set(), "dataset": set()})
         blacklist = CONFIG.get("blacklist", set())
+        easyocr_reader, easyocr_error = _get_easyocr_reader()
+        easyocr_enabled = easyocr_reader is not None
+        trocr_processor = None
+        trocr_model = None
+        trocr_error = ""
+        if ENABLE_TROCR:
+            trocr_processor, trocr_model, trocr_error = _get_trocr_engine()
+        trocr_enabled = ENABLE_TROCR and trocr_processor is not None and trocr_model is not None
 
         # Result containers
         variable_index = defaultdict(lambda: {
@@ -1299,6 +1514,18 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
             "ocr_success_count": 0,
             "ocr_fail_count": 0,
             "ocr_noise_rejected_count": 0,
+            "easyocr_enabled": easyocr_enabled,
+            "easyocr_error": easyocr_error if not easyocr_enabled else "",
+            "easyocr_used_count": 0,
+            "easyocr_wins_count": 0,
+            "easyocr_assist_count": 0,
+            "easyocr_fail_count": 0,
+            "trocr_enabled": trocr_enabled,
+            "trocr_error": trocr_error if not trocr_enabled else "",
+            "trocr_used_count": 0,
+            "trocr_wins_count": 0,
+            "trocr_assist_count": 0,
+            "trocr_fail_count": 0,
             "variables_extracted": 0
         }
 
@@ -1306,6 +1533,8 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
         for page_num in range(len(doc)):
             page = doc[page_num]
             page_idx = page_num + 1
+            easyocr_page_budget = 8
+            trocr_page_budget = 4
 
             # ==================== Render page to image ====================
             # Use 300 DPI for better short-code recognition accuracy
@@ -1336,7 +1565,7 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 border_density = float(box_info.get("border_density", 0.0))
 
                 # Fast prefilter: skip very wide, short strips that mostly come from row headers/body bands.
-                if h <= 19 and w >= 140 and aspect_ratio >= 7.5 and border_density < 0.35:
+                if h <= 14 and w >= 180 and aspect_ratio >= 9.5 and border_density < 0.30:
                     debug_info["roi_prefilter_skipped_count"] += 1
                     continue
 
@@ -1377,163 +1606,318 @@ def extract_variables_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
                 else:
                     ocr_text_score = _score_annotation_text(ocr_text)
 
-                if not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.8):
+                tesseract_total = ocr_text_score + _ocr_quality_adjustment(
+                    ocr_text,
+                    standard_terms.get("variable", set()),
+                    standard_terms.get("dataset", set()),
+                )
+                easyocr_text_for_assist = ""
+                should_try_easyocr = (
+                    easyocr_page_budget > 0
+                    and
+                    easyocr_enabled
+                    and (
+                        ocr_text_score < 3.0
+                        or w < 72
+                        or h < 24
+                        or _needs_second_pass_ocr(
+                            ocr_text,
+                            standard_terms.get("variable", set()),
+                            standard_terms.get("dataset", set()),
+                        )
+                        or not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.8)
+                    )
+                )
+                if should_try_easyocr:
+                    easyocr_page_budget -= 1
+                    debug_info["easyocr_used_count"] += 1
+                    easyocr_text, easyocr_conf = extract_text_easyocr(
+                        page_image,
+                        rect,
+                        easyocr_reader,
+                        margin=2,
+                    )
+                    if easyocr_text:
+                        easyocr_repaired = _repair_annotation_text(
+                            easyocr_text,
+                            standard_terms.get("variable", set()),
+                            standard_terms.get("dataset", set()),
+                        )
+                        if easyocr_repaired:
+                            easyocr_text = easyocr_repaired
+
+                        easyocr_text_for_assist = easyocr_text
+                        easyocr_score = _score_annotation_text(easyocr_text)
+                        easyocr_total = (
+                            easyocr_score
+                            + _ocr_quality_adjustment(
+                                easyocr_text,
+                                standard_terms.get("variable", set()),
+                                standard_terms.get("dataset", set()),
+                            )
+                            + (easyocr_conf * 2.5)
+                        )
+                        if easyocr_total >= (tesseract_total - 0.1):
+                            if easyocr_text != ocr_text:
+                                debug_info["easyocr_wins_count"] += 1
+                            ocr_text = easyocr_text
+                            ocr_text_score = easyocr_score
+                    else:
+                        debug_info["easyocr_fail_count"] += 1
+
+                trocr_text_for_assist = ""
+                should_try_trocr = (
+                    trocr_page_budget > 0
+                    and
+                    trocr_enabled
+                    and (
+                        ocr_text_score < 3.2
+                        or w < 120
+                        or h < 36
+                        or _needs_second_pass_ocr(
+                            ocr_text,
+                            standard_terms.get("variable", set()),
+                            standard_terms.get("dataset", set()),
+                        )
+                        or not _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.8)
+                    )
+                )
+                if should_try_trocr:
+                    trocr_page_budget -= 1
+                    debug_info["trocr_used_count"] += 1
+                    trocr_text = extract_text_trocr(
+                        page_image,
+                        rect,
+                        trocr_processor,
+                        trocr_model,
+                        margin=2,
+                    )
+                    if trocr_text:
+                        trocr_repaired = _repair_annotation_text(
+                            trocr_text,
+                            standard_terms.get("variable", set()),
+                            standard_terms.get("dataset", set()),
+                        )
+                        if trocr_repaired:
+                            trocr_text = trocr_repaired
+
+                        trocr_text_for_assist = trocr_text
+                        trocr_score = _score_annotation_text(trocr_text)
+                        trocr_total = (
+                            trocr_score
+                            + _ocr_quality_adjustment(
+                                trocr_text,
+                                standard_terms.get("variable", set()),
+                                standard_terms.get("dataset", set()),
+                            )
+                            + (0.8 if "=" in trocr_text else 0.0)
+                            + (0.5 if re.search(r"\bSUPP[A-Z]{2,8}\b", trocr_text) else 0.0)
+                        )
+                        current_total = ocr_text_score + _ocr_quality_adjustment(
+                            ocr_text,
+                            standard_terms.get("variable", set()),
+                            standard_terms.get("dataset", set()),
+                        )
+                        if trocr_total >= (current_total - 0.05):
+                            if trocr_text != ocr_text:
+                                debug_info["trocr_wins_count"] += 1
+                            ocr_text = trocr_text
+                            ocr_text_score = trocr_score
+                    else:
+                        debug_info["trocr_fail_count"] += 1
+
+                analysis_texts: List[str] = []
+                seen_analysis_texts: Set[str] = set()
+                if _passes_annotation_text_gate(ocr_text, ocr_text_score, min_score=1.8):
+                    cleaned_primary = _normalize_ocr_text(ocr_text)
+                    if cleaned_primary and cleaned_primary not in seen_analysis_texts:
+                        seen_analysis_texts.add(cleaned_primary)
+                        analysis_texts.append(cleaned_primary)
+
+                if easyocr_text_for_assist:
+                    assist_score = _score_annotation_text(easyocr_text_for_assist)
+                    assist_is_useful = (
+                        _passes_annotation_text_gate(easyocr_text_for_assist, assist_score, min_score=1.25)
+                        or bool(re.search(r"\b[A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*\s*=", easyocr_text_for_assist))
+                        or bool(re.search(r"\bSUPP[A-Z]{2,8}\b", easyocr_text_for_assist))
+                    )
+                    cleaned_assist = _normalize_ocr_text(easyocr_text_for_assist)
+                    if assist_is_useful and cleaned_assist and cleaned_assist not in seen_analysis_texts:
+                        seen_analysis_texts.add(cleaned_assist)
+                        analysis_texts.append(cleaned_assist)
+                        debug_info["easyocr_assist_count"] += 1
+
+                if trocr_text_for_assist:
+                    trocr_assist_score = _score_annotation_text(trocr_text_for_assist)
+                    trocr_assist_useful = (
+                        _passes_annotation_text_gate(trocr_text_for_assist, trocr_assist_score, min_score=1.25)
+                        or bool(re.search(r"\b[A-Z][A-Z0-9]{1,7}(?:/[A-Z][A-Z0-9]{1,7})*\s*=", trocr_text_for_assist))
+                        or bool(re.search(r"\bSUPP[A-Z]{2,8}\b", trocr_text_for_assist))
+                    )
+                    cleaned_trocr_assist = _normalize_ocr_text(trocr_text_for_assist)
+                    if trocr_assist_useful and cleaned_trocr_assist and cleaned_trocr_assist not in seen_analysis_texts:
+                        seen_analysis_texts.add(cleaned_trocr_assist)
+                        analysis_texts.append(cleaned_trocr_assist)
+                        debug_info["trocr_assist_count"] += 1
+
+                if not analysis_texts:
                     debug_info["ocr_noise_rejected_count"] += 1
                     continue
 
                 debug_info["ocr_success_count"] += 1
 
-                # ==================== Extract NOT SUBMITTED entries ====================
-                not_sub_list = extract_not_submitted_entries(ocr_text, page_idx)
-                not_submitted_entries.extend(not_sub_list)
+                for analysis_text in analysis_texts:
+                    # ==================== Extract NOT SUBMITTED entries ====================
+                    not_sub_list = extract_not_submitted_entries(analysis_text, page_idx)
+                    not_submitted_entries.extend(not_sub_list)
 
-                # ==================== Extract candidates ====================
-                candidates = extract_candidates(ocr_text)
+                    # ==================== Extract candidates ====================
+                    candidates = extract_candidates(analysis_text)
 
-                # Extract SUPP variable pairs
-                supp_pairs = parse_supp_variable(ocr_text)
-                for var, dataset in supp_pairs:
-                    candidates.add(var)
-                    candidates.add(dataset)
+                    # Extract SUPP variable pairs
+                    supp_pairs = parse_supp_variable(analysis_text)
+                    for var, dataset in supp_pairs:
+                        candidates.add(var)
+                        candidates.add(dataset)
 
-                # Extract VARIABLE=VALUE pairs
-                value_pairs = extract_variable_value_pairs(ocr_text)
-                for left_var, _, pair_text in value_pairs:
-                    normalized_left = left_var
-                    if normalized_left not in standard_terms.get("variable", set()):
-                        nearby_left = _find_unique_nearby_standard_term(
-                            normalized_left,
-                            standard_terms.get("variable", set()),
-                        )
-                        if nearby_left:
-                            normalized_left = nearby_left
-                            pair_text = re.sub(
-                                rf"^{re.escape(left_var)}=",
-                                f"{normalized_left}=",
-                                pair_text,
-                                flags=re.IGNORECASE,
+                    # Extract VARIABLE=VALUE pairs
+                    value_pairs = extract_variable_value_pairs(analysis_text)
+                    for left_var, _, pair_text in value_pairs:
+                        normalized_left = left_var
+                        if normalized_left not in standard_terms.get("variable", set()):
+                            nearby_left = _find_unique_nearby_standard_term(
+                                normalized_left,
+                                standard_terms.get("variable", set()),
                             )
+                            if nearby_left:
+                                normalized_left = nearby_left
+                                pair_text = re.sub(
+                                    rf"^{re.escape(left_var)}=",
+                                    f"{normalized_left}=",
+                                    pair_text,
+                                    flags=re.IGNORECASE,
+                                )
 
-                    category, match_level = classify_term(
-                        normalized_left, ocr_text, standard_terms,
-                        suffix_prefix_patterns, blacklist
-                    )
-                    if normalized_left in standard_terms.get("dataset", set()) and category != "not_submitted":
-                        category = "dataset_name"
-                        if match_level == "none":
-                            match_level = "exact"
-                    if category == "blacklist":
-                        continue
-
-                    variable_index[pair_text]["pages"].add(page_idx)
-                    variable_index[pair_text]["raw_contexts"].append(ocr_text.strip())
-
-                    current_level = variable_index[pair_text].get("match_level", "none")
-                    priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
-                    new_priority = priority.get(match_level, -1)
-                    current_priority = priority.get(current_level, -1)
-                    if new_priority > current_priority:
-                        variable_index[pair_text]["category"] = category
-                        variable_index[pair_text]["match_level"] = match_level
-                    elif new_priority == current_priority and category != "unknown":
-                        current_category = variable_index[pair_text].get("category", "unknown")
-                        category_rank = {
-                            "dataset_name": 3,
-                            "not_submitted": 3,
-                            "standard_variable": 2,
-                            "supp_variable": 1,
-                            "unknown": 0
-                        }
-                        if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
-                            variable_index[pair_text]["category"] = category
-
-                # Classify each candidate
-                for candidate in candidates:
-                    if not candidate or len(candidate) < 2 or len(candidate) > 8:
-                        continue
-
-                    upper_cand = candidate.upper()
-                    if upper_cand not in standard_terms.get("variable", set()):
-                        nearby_cand = _find_unique_nearby_standard_term(
-                            upper_cand,
-                            standard_terms.get("variable", set()),
+                        category, match_level = classify_term(
+                            normalized_left, analysis_text, standard_terms,
+                            suffix_prefix_patterns, blacklist
                         )
-                        if nearby_cand:
-                            upper_cand = nearby_cand
+                        if normalized_left in standard_terms.get("dataset", set()) and category != "not_submitted":
+                            category = "dataset_name"
+                            if match_level == "none":
+                                match_level = "exact"
+                        if category == "blacklist":
+                            continue
 
-                    category, match_level = classify_term(
-                        upper_cand, ocr_text, standard_terms,
-                        suffix_prefix_patterns, blacklist
-                    )
+                        variable_index[pair_text]["pages"].add(page_idx)
+                        variable_index[pair_text]["raw_contexts"].append(analysis_text.strip())
 
-                    # Prefer dataset classification when the term is a known dataset token.
-                    if upper_cand in standard_terms.get("dataset", set()) and category != "not_submitted":
-                        category = "dataset_name"
-                        if match_level == "none":
-                            match_level = "exact"
-                        # Track domain annotations
-                        domain_index[upper_cand].add(page_idx)
-                    elif category == "dataset_name" and upper_cand not in standard_terms.get("dataset", set()):
-                        context_upper = (ocr_text or "").upper()
-                        if not (
-                            upper_cand.startswith("SUPP")
-                            or re.search(rf"\b{re.escape(upper_cand)}\s*(?:=|\()", context_upper)
+                        current_level = variable_index[pair_text].get("match_level", "none")
+                        priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
+                        new_priority = priority.get(match_level, -1)
+                        current_priority = priority.get(current_level, -1)
+                        if new_priority > current_priority:
+                            variable_index[pair_text]["category"] = category
+                            variable_index[pair_text]["match_level"] = match_level
+                        elif new_priority == current_priority and category != "unknown":
+                            current_category = variable_index[pair_text].get("category", "unknown")
+                            category_rank = {
+                                "dataset_name": 3,
+                                "not_submitted": 3,
+                                "standard_variable": 2,
+                                "supp_variable": 1,
+                                "unknown": 0
+                            }
+                            if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
+                                variable_index[pair_text]["category"] = category
+
+                    # Classify each candidate
+                    for candidate in candidates:
+                        if not candidate or len(candidate) < 2 or len(candidate) > 8:
+                            continue
+
+                        upper_cand = candidate.upper()
+                        if upper_cand not in standard_terms.get("variable", set()):
+                            nearby_cand = _find_unique_nearby_standard_term(
+                                upper_cand,
+                                standard_terms.get("variable", set()),
+                            )
+                            if nearby_cand:
+                                upper_cand = nearby_cand
+
+                        category, match_level = classify_term(
+                            upper_cand, analysis_text, standard_terms,
+                            suffix_prefix_patterns, blacklist
+                        )
+
+                        # Prefer dataset classification when the term is a known dataset token.
+                        if upper_cand in standard_terms.get("dataset", set()) and category != "not_submitted":
+                            category = "dataset_name"
+                            if match_level == "none":
+                                match_level = "exact"
+                            # Track domain annotations
+                            domain_index[upper_cand].add(page_idx)
+                        elif category == "dataset_name" and upper_cand not in standard_terms.get("dataset", set()):
+                            context_upper = (analysis_text or "").upper()
+                            if not (
+                                upper_cand.startswith("SUPP")
+                                or re.search(rf"\b{re.escape(upper_cand)}\s*(?:=|\()", context_upper)
+                            ):
+                                category = "unknown"
+                                match_level = "none"
+
+                        # Skip blacklist items
+                        if category == "blacklist":
+                            continue
+
+                        if category == "unknown" and not _has_strong_unknown_signal(upper_cand, analysis_text):
+                            continue
+                        if (
+                            category == "standard_variable"
+                            and len(upper_cand) <= 3
+                            and upper_cand not in standard_terms.get("dataset", set())
+                            and not _has_strong_unknown_signal(upper_cand, analysis_text)
                         ):
-                            category = "unknown"
-                            match_level = "none"
+                            continue
+                        if (
+                            match_level == "suffix_prefix"
+                            and len(upper_cand) <= 2
+                            and upper_cand not in standard_terms.get("dataset", set())
+                            and not _has_strong_unknown_signal(upper_cand, analysis_text)
+                        ):
+                            continue
+                        if (
+                            category == "dataset_name"
+                            and len(upper_cand) <= 2
+                            and upper_cand not in standard_terms.get("dataset", set())
+                            and not _has_strong_unknown_signal(upper_cand, analysis_text)
+                        ):
+                            continue
 
-                    # Skip blacklist items
-                    if category == "blacklist":
-                        continue
+                        # Record this occurrence
+                        variable_index[upper_cand]["pages"].add(page_idx)
+                        variable_index[upper_cand]["raw_contexts"].append(analysis_text.strip())
 
-                    if category == "unknown" and not _has_strong_unknown_signal(upper_cand, ocr_text):
-                        continue
-                    if (
-                        category == "standard_variable"
-                        and len(upper_cand) <= 3
-                        and upper_cand not in standard_terms.get("dataset", set())
-                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
-                    ):
-                        continue
-                    if (
-                        match_level == "suffix_prefix"
-                        and len(upper_cand) <= 2
-                        and upper_cand not in standard_terms.get("dataset", set())
-                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
-                    ):
-                        continue
-                    if (
-                        category == "dataset_name"
-                        and len(upper_cand) <= 2
-                        and upper_cand not in standard_terms.get("dataset", set())
-                        and not _has_strong_unknown_signal(upper_cand, ocr_text)
-                    ):
-                        continue
+                        # Update category and match_level with priority logic
+                        current_level = variable_index[upper_cand].get("match_level", "none")
+                        priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
+                        new_priority = priority.get(match_level, -1)
+                        current_priority = priority.get(current_level, -1)
 
-                    # Record this occurrence
-                    variable_index[upper_cand]["pages"].add(page_idx)
-                    variable_index[upper_cand]["raw_contexts"].append(ocr_text.strip())
-
-                    # Update category and match_level with priority logic
-                    current_level = variable_index[upper_cand].get("match_level", "none")
-                    priority = {"exact": 3, "suffix_prefix": 2, "supp": 1, "none": 0}
-                    new_priority = priority.get(match_level, -1)
-                    current_priority = priority.get(current_level, -1)
-
-                    if new_priority > current_priority:
-                        variable_index[upper_cand]["category"] = category
-                        variable_index[upper_cand]["match_level"] = match_level
-                    elif new_priority == current_priority and category != "unknown":
-                        current_category = variable_index[upper_cand].get("category", "unknown")
-                        category_rank = {
-                            "dataset_name": 3,
-                            "not_submitted": 3,
-                            "standard_variable": 2,
-                            "supp_variable": 1,
-                            "unknown": 0
-                        }
-                        if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
+                        if new_priority > current_priority:
                             variable_index[upper_cand]["category"] = category
+                            variable_index[upper_cand]["match_level"] = match_level
+                        elif new_priority == current_priority and category != "unknown":
+                            current_category = variable_index[upper_cand].get("category", "unknown")
+                            category_rank = {
+                                "dataset_name": 3,
+                                "not_submitted": 3,
+                                "standard_variable": 2,
+                                "supp_variable": 1,
+                                "unknown": 0
+                            }
+                            if category_rank.get(category, 0) >= category_rank.get(current_category, 0):
+                                variable_index[upper_cand]["category"] = category
 
         # ==================== Build final variable list ====================
         variables_list = []
