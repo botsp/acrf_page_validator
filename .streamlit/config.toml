@@ -1,0 +1,9 @@
+[client]
+showErrorDetails = true
+
+[logger]
+level = "debug"
+
+[server]
+headless = true
+runOnSave = true
